@@ -52,10 +52,17 @@ type FILL_INFO = {
   fillId: string;
   buyerId: string;
   sellerId: string;
+
   symbol: CURRENCY_SYMBOL;
   qty: number;
   price: number;
   bidPrice: number;
+
+  //
+  prevBuyOrderFilledQty: number;
+  prevSellOrderFilledQty: number;
+  sellOrderId: string;
+  buyOrderId: string;
 };
 
 export type FILLS_INFO = FILL_INFO[];
@@ -83,7 +90,7 @@ export default class OrderBook {
   liquidPositions: Partial<
     Record<
       CURRENCY_SYMBOL,
-      Record<POSITION_TYPE, OrderedMap<number, POSITION[]>>
+      Record<POSITION_TYPE, OrderedMap<number, Set<POSITION>>>
     >
   > = {}; // this is per symbol per liquidation_price positions
 
@@ -223,6 +230,8 @@ export default class OrderBook {
     price: number,
     qty: number,
     userId: string,
+    marginType: MARGIN_TYPE,
+    margin: number,
   ) => {
     if (!this.orderBook[symbol]) {
       this.orderBook[symbol] = {
@@ -241,6 +250,9 @@ export default class OrderBook {
       side,
       type,
       symbol,
+      margin,
+      marginType,
+      status: "OPEN",
     };
 
     // emit depth update events
@@ -355,7 +367,167 @@ export default class OrderBook {
     this.depthUpdateOffset.set(symbol, this.depthUpdateOffset.get(symbol)! + 1);
   }
 
-  // todo
+  private updateFillsAndPositions(fills: FILLS_INFO) {
+    // there can be position updates at diff price levels for a single user
+    // so keep seller id map to orderid to updates
+    let positionUpdates: Record<
+      string,
+      Record<
+        string,
+        {
+          positionUpdatePriceQtyProduct: number;
+          positionUpdateQty: number;
+          isFirstFill: boolean;
+        }
+      >
+    > = {};
+
+    fills.forEach((fill) => {
+      this.fills[fill.fillId] = fill;
+
+      const {
+        buyerId,
+        sellerId,
+        price,
+        qty,
+        prevBuyOrderFilledQty,
+        prevSellOrderFilledQty,
+        sellOrderId,
+        buyOrderId,
+      } = fill;
+
+      if (!positionUpdates[buyerId])
+        positionUpdates[buyerId] = {
+          buyOrderId: {
+            positionUpdatePriceQtyProduct: 0,
+            positionUpdateQty: 0,
+            isFirstFill: false,
+          },
+        };
+      if (!positionUpdates[sellerId])
+        positionUpdates[sellerId] = {
+          sellOrderId: {
+            positionUpdatePriceQtyProduct: 0,
+            positionUpdateQty: 0,
+            isFirstFill: false,
+          },
+        };
+
+      positionUpdates[buyerId][buyOrderId]!.positionUpdatePriceQtyProduct +=
+        price * qty;
+      positionUpdates[buyerId][buyOrderId]!.positionUpdateQty += qty;
+      positionUpdates[buyerId][buyOrderId]!.isFirstFill ||=
+        prevBuyOrderFilledQty == 0;
+
+      positionUpdates[sellerId][sellOrderId]!.positionUpdatePriceQtyProduct -=
+        price * qty;
+      positionUpdates[sellerId][sellOrderId]!.positionUpdateQty -= qty;
+      positionUpdates[sellerId][sellOrderId]!.isFirstFill ||=
+        prevSellOrderFilledQty == 0;
+    });
+
+    // if first fill move whole margin to position, in more fills, ignore margin, as its already locked
+
+    for (const [userId, orderUpdates] of Object.entries(positionUpdates)) {
+      for (const [
+        orderId,
+        { positionUpdatePriceQtyProduct, positionUpdateQty, isFirstFill },
+      ] of Object.entries(orderUpdates)) {
+        let currentOrder = this.orders[orderId]!;
+        let symbol = currentOrder.symbol;
+        let weighedAvgPrice = positionUpdatePriceQtyProduct / positionUpdateQty;
+        let newPosition = this.positions[userId]?.[symbol]?.[weighedAvgPrice];
+        let prevLiquidationPrice = newPosition?.liquidationPrice;
+        let prevPositionType = newPosition?.type;
+
+        assert(
+          currentOrder,
+          "this order should be insdie order book right now ",
+        ); //
+
+        let filledRecentQty = Math.abs(positionUpdateQty);
+        let totalOrderQty = currentOrder.qty;
+
+        // doing partial margin filling for diff price positions made by same order
+
+        if (!newPosition) {
+          newPosition = {
+            createdAt: new Date(),
+            margin: (currentOrder.margin * filledRecentQty) / totalOrderQty,
+            marginType: currentOrder.marginType,
+            price: weighedAvgPrice,
+            qty: Math.abs(positionUpdateQty),
+            symbol: symbol,
+            type: positionUpdateQty >= 0 ? "LONG" : "SHORT",
+            userId,
+            liquidationPrice: 0, // TODO : calculate liquidation price later
+          };
+        } else {
+          // here
+          newPosition.margin +=
+            (currentOrder.margin * filledRecentQty) / totalOrderQty;
+          newPosition.qty += Math.abs(positionUpdateQty);
+          newPosition.type = newPosition.qty >= 0 ? "LONG" : "SHORT";
+          newPosition.marginType =
+            currentOrder.marginType == "CROSS" ||
+            newPosition.marginType == "CROSS"
+              ? "CROSS"
+              : "ISOLATED";
+          newPosition.liquidationPrice = 0;
+          // TODO : calculate liquidation price later
+          newPosition.symbol;
+        }
+
+        // update positions
+
+        if (newPosition.qty == 0) {
+          // remove from positions
+          delete this.positions[userId]?.[symbol]?.[weighedAvgPrice];
+        } else {
+          if (!this.positions[userId]) {
+            this.positions[userId] = {};
+          }
+          if (!this.positions[userId][symbol]) {
+            this.positions[userId][symbol] = {};
+          }
+          if (!this.positions[userId][symbol]![weighedAvgPrice])
+            this.positions[userId]![symbol]![weighedAvgPrice] = newPosition;
+        }
+
+        let liquidationPrice = newPosition.liquidationPrice;
+
+        // rmeove from old liqid level if there
+        if (prevLiquidationPrice && prevPositionType) {
+          // then we need to remove from old liquid Position price
+          let liquidLevel = this.liquidPositions?.[symbol]?.[prevPositionType]
+            ?.getElementByKey(prevLiquidationPrice)
+            ?.delete(newPosition); // this delets by ref ,so does not matter if its updated newPosition
+          //
+        }
+
+        // put into new liquid level
+        if (newPosition.qty != 0) {
+          if (!this.liquidPositions[symbol]) {
+            this.liquidPositions[symbol] = {
+              LONG: new OrderedMap(),
+              SHORT: new OrderedMap(),
+            };
+          }
+          let liquidLevel =
+            this.liquidPositions[symbol]![newPosition.type]?.getElementByKey(
+              liquidationPrice,
+            ) || new Set<POSITION>();
+          liquidLevel.add(newPosition);
+
+          this.liquidPositions[symbol]![newPosition.type].setElement(
+            liquidationPrice,
+            liquidLevel,
+          );
+        }
+      }
+    }
+  }
+
   private placeLimitOrder = (
     type: TYPE,
     side: SIDE,
@@ -444,6 +616,14 @@ export default class OrderBook {
             price: exchangePrice,
             qty: toExchangeQty,
             symbol,
+            prevBuyOrderFilledQty:
+              side == "BUY" ? currentOrder.filledQty : frontOrder!.filledQty,
+            prevSellOrderFilledQty:
+              side == "SELL" ? currentOrder.filledQty : frontOrder!.filledQty,
+            buyOrderId:
+              side == "BUY" ? currentOrder.orderId : frontOrder!.orderId,
+            sellOrderId:
+              side == "SELL" ? currentOrder.orderId : frontOrder!.orderId,
           });
 
           frontOrder!.filledQty += toExchangeQty;
@@ -472,6 +652,9 @@ export default class OrderBook {
     // sit on orderbook for pending order
     if (currentOrder.filledQty < currentOrder.qty) {
       // put into orders object
+      currentOrder.status =
+        currentOrder.filledQty == 0 ? "OPEN" : "PARTIALLY_FILLED";
+
       this.orders[currentOrder.orderId] = currentOrder;
 
       let prevPriceLevel: PRICE_LEVEL;
@@ -502,91 +685,13 @@ export default class OrderBook {
         price,
         prevPriceLevel.totalQuantity,
       );
+    } else {
+      currentOrder.status = "FILLED";
+      // todo : maybe send to db or whatever, dont wanna keep filled orders in memory
     }
 
-    let positionUpdates: Record<
-      string,
-      { positionUpdatePriceQtyProduct: number; positionUpdateQty: number }
-    > = {};
-
-    fillsToReturn.forEach((fill) => {
-      this.fills[fill.fillId] = fill;
-
-      const { buyerId, sellerId, price, qty } = fill;
-
-      if (!positionUpdates[buyerId])
-        positionUpdates[buyerId] = {
-          positionUpdatePriceQtyProduct: 0,
-          positionUpdateQty: 0,
-        };
-      if (!positionUpdates[sellerId])
-        positionUpdates[sellerId] = {
-          positionUpdatePriceQtyProduct: 0,
-          positionUpdateQty: 0,
-        };
-
-      positionUpdates[buyerId].positionUpdatePriceQtyProduct += price * qty;
-      positionUpdates[buyerId].positionUpdateQty += qty;
-
-      positionUpdates[sellerId].positionUpdatePriceQtyProduct -= price * qty;
-      positionUpdates[sellerId].positionUpdateQty -= qty;
-    });
-
-    for (const [
-      userId,
-      { positionUpdatePriceQtyProduct, positionUpdateQty },
-    ] of Object.entries(positionUpdates)) {
-      let weighedAvgPrice = positionUpdatePriceQtyProduct / positionUpdateQty;
-      let newPosition =
-        this.positions[userId]?.[currentOrder.symbol]?.[weighedAvgPrice];
-
-      let existsBeforehand = false;
-      if (!newPosition) {
-        newPosition = {
-          createdAt: new Date(),
-          margin: currentOrder.margin,
-          marginType: currentOrder.marginType,
-          price: weighedAvgPrice,
-          qty: currentOrder.qty - currentOrder.filledQty,
-          symbol: currentOrder.symbol,
-          type: currentOrder.side == "BUY" ? "LONG" : "SHORT",
-          userId,
-          liquidationPrice: 0, // TODO : calculate liquidation price later
-        };
-      } else {
-        existsBeforehand = true;
-
-        newPosition.margin += currentOrder.margin;
-        newPosition.qty += Math.abs(positionUpdateQty);
-        newPosition.type = newPosition.qty >= 0 ? "LONG" : "SHORT";
-        newPosition.marginType =
-          currentOrder.marginType == "CROSS" ||
-          newPosition.marginType == "CROSS"
-            ? "CROSS"
-            : "ISOLATED";
-        newPosition.liquidationPrice = 0;
-        // TODO : calculate liquidation price later
-        newPosition.symbol;
-      }
-
-      // put into positions
-      this.positions[userId]![currentOrder.symbol]![weighedAvgPrice] =
-        newPosition;
-
-      // put into liquid level
-      if (existsBeforehand) {
-        // then we need to remove from existing liquid lvl
-      }
-      // put into current level
-
-      // let prevLiquidPositons =
-      // this.liquidPositions?.[currentOrder.symbol]?.[
-      // newPosition.type
-      // ]?.getElementByKey?.(weighedAvgPrice) || [];
-      // this.liquidPositions[currentOrder.symbol][newPosition.type].setElement(
-      // weighedAvgPrice,
-      // );
-    }
+    // put into fills , liquidPrices , positions
+    this.updateFillsAndPositions(fillsToReturn);
 
     //emit dpth udpate events
     this.emitDepthUpdateEvents(symbol, depthUpdates);
@@ -646,9 +751,9 @@ export default class OrderBook {
           symbol,
           price!,
           qty,
-          margin,
-          marginType,
           userId,
+          marginType,
+          margin,
         );
     } else {
       toReturn = this.placeLimitOrder(
