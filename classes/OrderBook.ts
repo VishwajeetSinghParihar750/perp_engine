@@ -59,8 +59,6 @@ type FILL_INFO = {
   bidPrice: number;
 
   //
-  prevBuyOrderFilledQty: number;
-  prevSellOrderFilledQty: number;
   sellOrderId: string;
   buyOrderId: string;
 };
@@ -81,6 +79,12 @@ type ORDERBOOK = Partial<
 export default class OrderBook {
   orderBook: ORDERBOOK = {};
   orders: Record<ORDER_ID, ORDER> = {}; // here keep ref of item in orderbook, to not double memeory
+
+  // TODO : how will you get deleted orders in createOrder handling
+  cacheOrders: Record<ORDER_ID, ORDER> = {}; // these are deleted orders or not placed in orderbook orders
+  //  whatever is deleted in this request handling, it would be kept here
+  // create and cancel order would reset this to empty on each call before start
+
   fills: Record<string, FILL_INFO> = {};
 
   eventBus: EventBus;
@@ -101,31 +105,16 @@ export default class OrderBook {
 
   // todo
   private placeMarketBuyOrder = (
-    type: TYPE,
-    side: SIDE,
-    symbol: CURRENCY_SYMBOL,
-    qty: number,
-    userId: string,
-    maxMarketBidSpend: number, // TODO
+    currentOrder: ORDER,
+    maxMarketBidSpend: number,
   ) => {
+    const { symbol, side } = currentOrder;
     if (!this.orderBook[symbol]) {
       this.orderBook[symbol] = {
         ASKS: new OrderedMap(),
         BIDS: new OrderedMap(),
       };
     }
-
-    let currentOrder: ORDER = {
-      createdAt: new Date(),
-      filledQty: 0,
-      orderId: crypto.randomUUID(),
-      price: 0, // 0 price means  market order
-      qty: qty,
-      userId: userId,
-      side,
-      type,
-      symbol,
-    };
 
     // emit depth update events
     //  find depthUpdateInfo
@@ -223,37 +212,15 @@ export default class OrderBook {
   };
 
   // todo
-  private placeMarketSellOrder = (
-    type: TYPE,
-    side: SIDE,
-    symbol: CURRENCY_SYMBOL,
-    price: number,
-    qty: number,
-    userId: string,
-    marginType: MARGIN_TYPE,
-    margin: number,
-  ) => {
+  private placeMarketSellOrder = (currentOrder: ORDER) => {
+    const { symbol, side, userId } = currentOrder;
+
     if (!this.orderBook[symbol]) {
       this.orderBook[symbol] = {
         ASKS: new OrderedMap(),
         BIDS: new OrderedMap(),
       };
     }
-
-    let currentOrder: ORDER = {
-      createdAt: new Date(),
-      filledQty: 0,
-      orderId: crypto.randomUUID(),
-      price: price,
-      qty: qty,
-      userId: userId,
-      side,
-      type,
-      symbol,
-      margin,
-      marginType,
-      status: "OPEN",
-    };
 
     // emit depth update events
     //  find depthUpdateInfo
@@ -299,6 +266,14 @@ export default class OrderBook {
           price: Math.min(frontOrder!.price, currentOrder.price),
           qty: toExchangeQty,
           symbol,
+          prevBuyOrderFilledQty:
+            side == "BUY" ? currentOrder.filledQty : frontOrder!.filledQty,
+          prevSellOrderFilledQty:
+            side == "SELL" ? currentOrder.filledQty : frontOrder!.filledQty,
+          buyOrderId:
+            side == "BUY" ? currentOrder.orderId : frontOrder!.orderId,
+          sellOrderId:
+            side == "SELL" ? currentOrder.orderId : frontOrder!.orderId,
         });
 
         frontOrder!.filledQty += toExchangeQty;
@@ -325,6 +300,8 @@ export default class OrderBook {
     fillsToReturn.forEach((fill) => {
       this.fills[fill.fillId] = fill;
     });
+    //
+    this.updateFillsAndPositions(fillsToReturn);
 
     this.emitDepthUpdateEvents(symbol, depthUpdates);
 
@@ -377,31 +354,21 @@ export default class OrderBook {
         {
           positionUpdatePriceQtyProduct: number;
           positionUpdateQty: number;
-          isFirstFill: boolean;
         }
       >
     > = {};
 
+    // save fills and get positon updates
     fills.forEach((fill) => {
       this.fills[fill.fillId] = fill;
 
-      const {
-        buyerId,
-        sellerId,
-        price,
-        qty,
-        prevBuyOrderFilledQty,
-        prevSellOrderFilledQty,
-        sellOrderId,
-        buyOrderId,
-      } = fill;
+      const { buyerId, sellerId, price, qty, sellOrderId, buyOrderId } = fill;
 
       if (!positionUpdates[buyerId])
         positionUpdates[buyerId] = {
           buyOrderId: {
             positionUpdatePriceQtyProduct: 0,
             positionUpdateQty: 0,
-            isFirstFill: false,
           },
         };
       if (!positionUpdates[sellerId])
@@ -409,29 +376,25 @@ export default class OrderBook {
           sellOrderId: {
             positionUpdatePriceQtyProduct: 0,
             positionUpdateQty: 0,
-            isFirstFill: false,
           },
         };
 
       positionUpdates[buyerId][buyOrderId]!.positionUpdatePriceQtyProduct +=
         price * qty;
       positionUpdates[buyerId][buyOrderId]!.positionUpdateQty += qty;
-      positionUpdates[buyerId][buyOrderId]!.isFirstFill ||=
-        prevBuyOrderFilledQty == 0;
 
       positionUpdates[sellerId][sellOrderId]!.positionUpdatePriceQtyProduct -=
         price * qty;
       positionUpdates[sellerId][sellOrderId]!.positionUpdateQty -= qty;
-      positionUpdates[sellerId][sellOrderId]!.isFirstFill ||=
-        prevSellOrderFilledQty == 0;
     });
 
-    // if first fill move whole margin to position, in more fills, ignore margin, as its already locked
+    // give out partial margin to diff price positions from order
+    // and update positions, liquid positions
 
     for (const [userId, orderUpdates] of Object.entries(positionUpdates)) {
       for (const [
         orderId,
-        { positionUpdatePriceQtyProduct, positionUpdateQty, isFirstFill },
+        { positionUpdatePriceQtyProduct, positionUpdateQty },
       ] of Object.entries(orderUpdates)) {
         let currentOrder = this.orders[orderId]!;
         let symbol = currentOrder.symbol;
@@ -528,37 +491,15 @@ export default class OrderBook {
     }
   }
 
-  private placeLimitOrder = (
-    type: TYPE,
-    side: SIDE,
-    symbol: CURRENCY_SYMBOL,
-    price: number,
-    qty: number,
-    userId: string,
-    margin: number,
-    marginType: MARGIN_TYPE,
-  ) => {
+  private placeLimitOrder = (currentOrder: ORDER) => {
+    let { symbol, side, userId, price } = currentOrder;
+
     if (!this.orderBook[symbol]) {
       this.orderBook[symbol] = {
         ASKS: new OrderedMap(),
         BIDS: new OrderedMap(),
       };
     }
-
-    let currentOrder: ORDER = {
-      createdAt: new Date(),
-      filledQty: 0,
-      orderId: crypto.randomUUID(),
-      price: price,
-      qty: qty,
-      userId: userId,
-      side,
-      type,
-      symbol,
-      margin,
-      marginType,
-      status: "OPEN",
-    };
 
     // emit depth update events
     //  find depthUpdateInfo
@@ -616,10 +557,6 @@ export default class OrderBook {
             price: exchangePrice,
             qty: toExchangeQty,
             symbol,
-            prevBuyOrderFilledQty:
-              side == "BUY" ? currentOrder.filledQty : frontOrder!.filledQty,
-            prevSellOrderFilledQty:
-              side == "SELL" ? currentOrder.filledQty : frontOrder!.filledQty,
             buyOrderId:
               side == "BUY" ? currentOrder.orderId : frontOrder!.orderId,
             sellOrderId:
@@ -732,40 +669,28 @@ export default class OrderBook {
     fillsInfo: FILLS_INFO;
   } => {
     let toReturn;
+
+    let currentOrder: ORDER = {
+      createdAt: new Date(),
+      filledQty: 0,
+      orderId: crypto.randomUUID(),
+      price: price || 0,
+      qty: qty,
+      userId: userId,
+      side,
+      type,
+      symbol,
+      margin,
+      marginType,
+      status: "OPEN",
+    };
+
     if (type == "MARKET") {
       if (side == "BUY")
-        toReturn = this.placeMarketBuyOrder(
-          type,
-          side,
-          symbol,
-          qty,
-          userId,
-          margin,
-          marginType,
-          maxMarketBidSpend!,
-        );
-      else
-        toReturn = this.placeMarketSellOrder(
-          type,
-          side,
-          symbol,
-          price!,
-          qty,
-          userId,
-          marginType,
-          margin,
-        );
+        toReturn = this.placeMarketBuyOrder(currentOrder, maxMarketBidSpend);
+      else toReturn = this.placeMarketSellOrder(currentOrder);
     } else {
-      toReturn = this.placeLimitOrder(
-        type,
-        side,
-        symbol,
-        price!,
-        qty,
-        userId,
-        margin,
-        marginType,
-      );
+      toReturn = this.placeLimitOrder(currentOrder);
     }
 
     toReturn.fillsInfo.forEach((fillInfo) => {
