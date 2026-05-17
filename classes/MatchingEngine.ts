@@ -1,41 +1,25 @@
 import OrderBook, { type FILLS_INFO } from "./OrderBook.js";
 import Balances from "./Balances.js";
-import type { CURRENCY_SYMBOL, ORDER_ID, SIDE, TYPE } from "../types/order.js";
+import type {
+  CURRENCY_SYMBOL,
+  MARGIN_TYPE,
+  ORDER_ID,
+  SIDE,
+  TYPE,
+} from "../types/order.js";
 import { InsufficientBalanceError } from "./Errors/MatchingEngine.js";
 import EventBus from "./EventBus.js";
-import { getDefaultHighWaterMark } from "node:stream";
-import { string } from "zod";
 
 export default class MatchingEngine {
   private balances: Balances;
   private orderBook: OrderBook;
 
-  private readonly minMarginRequired = 5;
+  private readonly MAX_LEVERAGE_ALLOWED = 5;
 
-  private debtForExchange = 0;
-
-  private setupEventHandlers(eventBus: EventBus) {
-    eventBus.on("users_pnl.updated", ({ type, data }) => {
-      Object.entries(data as Record<string, number>).forEach(
-        ([userId, pnl]) => {
-          let bal = this.balances.getBalance(userId, "USD") as number;
-          bal += pnl;
-          this.debtForExchange += Math.abs(Math.min(0, bal));
-          bal = Math.max(0, bal);
-
-          if (pnl > 0) this.balances.addBalance(userId, "USD", pnl);
-          else if (pnl < 0)
-            this.balances.removeBalance(userId, "USD", Math.abs(pnl));
-        },
-      );
-    });
-  }
+  private exchangeBalance = 0; // this wil be paid from exchagne insurance fund, if not available deleverage, so for now balance can go negative
 
   constructor(eventBus: EventBus) {
     this.balances = new Balances();
-
-    this.setupEventHandlers(eventBus);
-
     this.orderBook = new OrderBook(eventBus);
   }
 
@@ -44,8 +28,12 @@ export default class MatchingEngine {
     side: SIDE,
     symbol: CURRENCY_SYMBOL,
     qty: number,
+
     userId: string,
+    margin: number,
+    marginType: MARGIN_TYPE,
     price?: number,
+    maxMarketBidSpend?: number,
   ): {
     status: "REJECTED" | "OPEN" | "FILLED";
     orderId?: ORDER_ID;
@@ -53,62 +41,38 @@ export default class MatchingEngine {
   } {
     const initialUSDBalance = this.balances.getBalance(userId, "USD") as number;
 
-    if (side == "BUY") {
-      // check balance
-
-      if (type == "LIMIT") {
-        const neededBal = price! * qty;
-        const availBal = this.balances.getBalance(userId, "USD") as number;
-
-        if (neededBal > availBal) throw new InsufficientBalanceError();
-
-        // deduct bidders balance
-        this.balances.removeBalance(userId, "USD", neededBal);
-      } else {
-        if (initialUSDBalance == 0) throw new InsufficientBalanceError();
-        // make his balance zero
-        this.balances.removeBalance(userId, "USD", initialUSDBalance);
-      }
-    } else {
-      // check balance
-      const availBal = this.balances.getBalance(userId, symbol) as number;
-      if (availBal < qty) throw new InsufficientBalanceError();
-
-      // deduct askers balance
-      this.balances.removeBalance(userId, symbol, qty);
+    // check and reduce balance for margin
+    if (price) {
+      let marginNeeded = (price * qty) / this.MAX_LEVERAGE_ALLOWED;
     }
 
     // place order in orderbook, get back fills
-    let { newOrderId, fillsInfo, totalFilledQuantity } =
+    let { newOrderId, usersPnlUpdate, totalFilledQuantity } =
       this.orderBook.createOrder(
         type,
         side,
         symbol,
         qty,
         userId,
+        margin,
+        marginType,
         price,
         initialUSDBalance,
       );
 
-    let usdSpent = 0;
+    Object.entries(usersPnlUpdate).forEach(([userId, pnl]) => {
+      let ogBal = this.balances.getBalance(userId, "USD") as number;
+      this.exchangeBalance += Math.min(0, ogBal + pnl);
 
-    // update balances based on fills
-    fillsInfo.forEach(
-      ({ buyerId, sellerId, price, bidPrice, qty, symbol: filledSymbol }) => {
-        // add and remove , coz there might be gap in bid and ask, and we dont want floating point errors, so return whole money first
-        this.balances.addBalance(buyerId, "USD", bidPrice * qty - price * qty);
+      if (pnl > 0) this.balances.addBalance(userId, "USD", pnl);
+      else
+        this.balances.removeBalance(
+          userId,
+          "USD",
+          Math.min(ogBal, Math.abs(pnl)),
+        );
+    });
 
-        this.balances.addBalance(buyerId, filledSymbol, qty);
-        this.balances.addBalance(sellerId, "USD", price * qty);
-
-        usdSpent += price * qty;
-      },
-    );
-
-    // return back locked money of user for market bid...  MAYBE : ( maybe also keep locked money info in balances )
-    if (type == "MARKET" && side == "BUY") {
-      this.balances.addBalance(userId, "USD", initialUSDBalance - usdSpent);
-    }
     // return new order info
     return {
       status: totalFilledQuantity == qty ? "FILLED" : "OPEN",

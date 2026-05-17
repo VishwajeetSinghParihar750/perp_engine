@@ -5,15 +5,13 @@ import {
   type ORDER_ID,
   type SIDE,
   type TYPE,
+  type MARGIN_TYPE,
+  type ORDER_STATUS,
+  type POSITION_TYPE,
 } from "../types/order.js";
 import { assert } from "node:console";
 import type { ENGINE_EVENT } from "../types/events/event.js";
 import type EventBus from "./EventBus.js";
-
-type MARGIN_TYPE = "ISOLATED" | "CROSS";
-type ORDER_STATUS = "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELLED";
-
-type POSITION_TYPE = "SHORT" | "LONG";
 
 type ORDER = {
   userId: string;
@@ -221,11 +219,17 @@ export default class OrderBook {
       }
     }
 
-    this.updateFillsAndPositions(fillsToReturn);
-    this.emitDepthUpdateEvents(symbol, depthUpdates);
+    let { pnlUpdates } = this.updateFillsAndPositions(fillsToReturn);
+    let marginToReturn =
+      ((currentOrder.qty - currentOrder.filledQty) * currentOrder.margin) /
+      currentOrder.qty;
+
+    if (!pnlUpdates[currentOrder.userId])
+      pnlUpdates[currentOrder.userId] = marginToReturn;
+    else pnlUpdates[currentOrder.userId]! += marginToReturn;
 
     return {
-      fillsInfo: fillsToReturn,
+      usersPnlUpdate: pnlUpdates,
       newOrderId: currentOrder.orderId,
       totalFilledQuantity: currentOrder.filledQty,
     };
@@ -329,12 +333,19 @@ export default class OrderBook {
       this.fills[fill.fillId] = fill;
     });
     //
-    this.updateFillsAndPositions(fillsToReturn);
+    let { pnlUpdates } = this.updateFillsAndPositions(fillsToReturn);
+    let marginToReturn =
+      ((currentOrder.qty - currentOrder.filledQty) * currentOrder.margin) /
+      currentOrder.qty;
+
+    if (!pnlUpdates[currentOrder.userId])
+      pnlUpdates[currentOrder.userId] = marginToReturn;
+    else pnlUpdates[currentOrder.userId]! += marginToReturn;
 
     this.emitDepthUpdateEvents(symbol, depthUpdates);
 
     return {
-      fillsInfo: fillsToReturn,
+      usersPnlUpdate: pnlUpdates,
       newOrderId: currentOrder.orderId,
       totalFilledQuantity: currentOrder.filledQty,
     };
@@ -594,8 +605,7 @@ export default class OrderBook {
       }
     }
 
-    // emit pnl update, matching engine will use
-    this.emitEvent({ type: "users_pnl.updated", data: usersPnlUpdate });
+    return { pnlUpdates: usersPnlUpdate };
   }
 
   private placeLimitOrder = (currentOrder: ORDER) => {
@@ -753,13 +763,13 @@ export default class OrderBook {
     }
 
     // put into fills , liquidPrices , positions
-    this.updateFillsAndPositions(fillsToReturn);
+    let { pnlUpdates } = this.updateFillsAndPositions(fillsToReturn);
 
     //emit dpth udpate events
     this.emitDepthUpdateEvents(symbol, depthUpdates);
 
     return {
-      fillsInfo: fillsToReturn,
+      usersPnlUpdate: pnlUpdates,
       newOrderId: currentOrder.orderId,
       totalFilledQuantity: currentOrder.filledQty,
     };
@@ -790,7 +800,7 @@ export default class OrderBook {
   ): {
     newOrderId: ORDER_ID;
     totalFilledQuantity: number;
-    fillsInfo: FILLS_INFO;
+    usersPnlUpdate: Record<string, number>;
   } => {
     let toReturn;
 
@@ -816,14 +826,6 @@ export default class OrderBook {
     } else {
       toReturn = this.placeLimitOrder(currentOrder);
     }
-
-    toReturn.fillsInfo.forEach((fillInfo) => {
-      this.orderBook[fillInfo.symbol]?.ASKS.getElementByKey(fillInfo.price)
-        ?.totalQuantity;
-
-      this.orderBook[fillInfo.symbol]?.ASKS.getElementByKey(fillInfo.price)
-        ?.totalQuantity;
-    });
 
     return toReturn;
   };

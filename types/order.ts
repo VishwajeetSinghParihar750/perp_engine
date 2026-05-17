@@ -4,5 +4,17 @@ type TYPE = "LIMIT" | "MARKET";
 type SIDE = "BUY" | "SELL";
 type ORDER_ID = string;
 
-export type { CURRENCY_SYMBOL, TYPE, SIDE, ORDER_ID };
+type MARGIN_TYPE = "ISOLATED" | "CROSS";
+type ORDER_STATUS = "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELLED";
+
+type POSITION_TYPE = "SHORT" | "LONG";
+export type {
+  CURRENCY_SYMBOL,
+  TYPE,
+  SIDE,
+  ORDER_ID,
+  MARGIN_TYPE,
+  ORDER_STATUS,
+  POSITION_TYPE,
+};
 export { CURRENCY_SYMBOL_ARRAY };
