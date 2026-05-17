@@ -117,7 +117,7 @@ export default class OrderBook {
     currentOrder: ORDER,
     maxMarketBidSpend: number,
   ) => {
-    const { symbol, side } = currentOrder;
+    const { symbol, side, userId } = currentOrder;
     if (!this.orderBook[symbol]) {
       this.orderBook[symbol] = {
         ASKS: new OrderedMap(),
@@ -169,10 +169,27 @@ export default class OrderBook {
         );
 
         fillsToReturn.push({
+          buyOrderInfo: {
+            buyerId: side == "BUY" ? userId : frontOrder!.userId,
+            margin: side == "BUY" ? currentOrder.margin : frontOrder!.margin,
+            marginType:
+              side == "BUY" ? currentOrder.marginType : frontOrder!.marginType,
+            orderId: side == "BUY" ? currentOrder.orderId : frontOrder!.orderId,
+            totalQty: side == "BUY" ? currentOrder.qty : frontOrder!.qty,
+          },
+
+          sellOrderInfo: {
+            sellerId: side == "SELL" ? userId : frontOrder!.userId,
+            margin: side == "SELL" ? currentOrder.margin : frontOrder!.margin,
+            marginType:
+              side == "SELL" ? currentOrder.marginType : frontOrder!.marginType,
+            orderId:
+              side == "SELL" ? currentOrder.orderId : frontOrder!.orderId,
+            totalQty: side == "SELL" ? currentOrder.qty : frontOrder!.qty,
+          },
+
           fillId: crypto.randomUUID(),
           bidPrice: frontOrder!.price,
-          buyerId: userId,
-          sellerId: frontOrder!.userId,
           price: frontOrder!.price,
           qty: toExchangeQty,
           symbol,
@@ -205,12 +222,7 @@ export default class OrderBook {
       }
     }
 
-    // save fills
-
-    fillsToReturn.forEach((fill) => {
-      this.fills[fill.fillId] = fill;
-    });
-
+    this.updateFillsAndPositions(fillsToReturn);
     this.emitDepthUpdateEvents(symbol, depthUpdates);
 
     return {
@@ -220,7 +232,6 @@ export default class OrderBook {
     };
   };
 
-  // todo
   private placeMarketSellOrder = (currentOrder: ORDER) => {
     const { symbol, side, userId } = currentOrder;
 
@@ -268,21 +279,30 @@ export default class OrderBook {
         );
 
         fillsToReturn.push({
+          buyOrderInfo: {
+            buyerId: side == "BUY" ? userId : frontOrder!.userId,
+            margin: side == "BUY" ? currentOrder.margin : frontOrder!.margin,
+            marginType:
+              side == "BUY" ? currentOrder.marginType : frontOrder!.marginType,
+            orderId: side == "BUY" ? currentOrder.orderId : frontOrder!.orderId,
+            totalQty: side == "BUY" ? currentOrder.qty : frontOrder!.qty,
+          },
+
+          sellOrderInfo: {
+            sellerId: side == "SELL" ? userId : frontOrder!.userId,
+            margin: side == "SELL" ? currentOrder.margin : frontOrder!.margin,
+            marginType:
+              side == "SELL" ? currentOrder.marginType : frontOrder!.marginType,
+            orderId:
+              side == "SELL" ? currentOrder.orderId : frontOrder!.orderId,
+            totalQty: side == "SELL" ? currentOrder.qty : frontOrder!.qty,
+          },
+
           fillId: crypto.randomUUID(),
           bidPrice: Math.max(frontOrder!.price, currentOrder.price),
-          sellerId: userId,
-          buyerId: frontOrder!.userId,
           price: Math.min(frontOrder!.price, currentOrder.price),
           qty: toExchangeQty,
           symbol,
-          prevBuyOrderFilledQty:
-            side == "BUY" ? currentOrder.filledQty : frontOrder!.filledQty,
-          prevSellOrderFilledQty:
-            side == "SELL" ? currentOrder.filledQty : frontOrder!.filledQty,
-          buyOrderId:
-            side == "BUY" ? currentOrder.orderId : frontOrder!.orderId,
-          sellOrderId:
-            side == "SELL" ? currentOrder.orderId : frontOrder!.orderId,
         });
 
         frontOrder!.filledQty += toExchangeQty;
@@ -742,7 +762,7 @@ export default class OrderBook {
 
     if (type == "MARKET") {
       if (side == "BUY")
-        toReturn = this.placeMarketBuyOrder(currentOrder, maxMarketBidSpend);
+        toReturn = this.placeMarketBuyOrder(currentOrder, maxMarketBidSpend!);
       else toReturn = this.placeMarketSellOrder(currentOrder);
     } else {
       toReturn = this.placeLimitOrder(currentOrder);
