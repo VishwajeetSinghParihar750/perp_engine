@@ -7,7 +7,6 @@ import type {
   SIDE,
   TYPE,
 } from "../types/order.js";
-import { InsufficientBalanceError } from "./Errors/MatchingEngine.js";
 import EventBus from "./EventBus.js";
 
 export default class MatchingEngine {

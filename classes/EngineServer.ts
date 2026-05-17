@@ -78,6 +78,7 @@ class EngineServer {
     this.matchingEngine = new MatchingEngine(this.eventBus);
     this.setupRedis();
   }
+
   private handleGetDepthRequest = (
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
