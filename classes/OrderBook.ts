@@ -50,17 +50,25 @@ type PRICE_LEVEL = { totalQuantity: number; orders: LinkList<ORDER> };
 
 type FILL_INFO = {
   fillId: string;
-  buyerId: string;
-  sellerId: string;
-
   symbol: CURRENCY_SYMBOL;
   qty: number;
   price: number;
   bidPrice: number;
 
-  //
-  sellOrderId: string;
-  buyOrderId: string;
+  sellOrderInfo: {
+    sellerId: string;
+    orderId: string;
+    totalQty: number;
+    margin: number;
+    marginType: MARGIN_TYPE;
+  };
+  buyOrderInfo: {
+    buyerId: string;
+    orderId: string;
+    totalQty: number;
+    margin: number;
+    marginType: MARGIN_TYPE;
+  };
 };
 
 export type FILLS_INFO = FILL_INFO[];
@@ -76,21 +84,21 @@ type ORDERBOOK = Partial<
   >
 >;
 
+// TODO : separate isolated and cross margin, they cant be merged together, that means
+// you can have two positions at same price, one - isolated , one - cross
+
+// INFO : cross margin has dynamic liquidation price, that we dont have to do right now, just do isolated right now
+
 export default class OrderBook {
   orderBook: ORDERBOOK = {};
   orders: Record<ORDER_ID, ORDER> = {}; // here keep ref of item in orderbook, to not double memeory
-
-  // TODO : how will you get deleted orders in createOrder handling
-  cacheOrders: Record<ORDER_ID, ORDER> = {}; // these are deleted orders or not placed in orderbook orders
-  //  whatever is deleted in this request handling, it would be kept here
-  // create and cancel order would reset this to empty on each call before start
 
   fills: Record<string, FILL_INFO> = {};
 
   eventBus: EventBus;
   depthUpdateOffset: Map<CURRENCY_SYMBOL, number>;
 
-  // new for perp
+  // new for perp (just for isolated right now)
   liquidPositions: Partial<
     Record<
       CURRENCY_SYMBOL,
@@ -98,7 +106,8 @@ export default class OrderBook {
     >
   > = {}; // this is per symbol per liquidation_price positions
 
-  positions: Record<
+  // just isolated
+  isolatedPositions: Record<
     string,
     Partial<Record<CURRENCY_SYMBOL, Record<number, POSITION>>>
   > = {}; // this is per user per symbol per price positions
@@ -354,6 +363,10 @@ export default class OrderBook {
         {
           positionUpdatePriceQtyProduct: number;
           positionUpdateQty: number;
+          symbol: CURRENCY_SYMBOL;
+          totalQty: number;
+          margin: number;
+          marginType: MARGIN_TYPE;
         }
       >
     > = {};
@@ -362,13 +375,20 @@ export default class OrderBook {
     fills.forEach((fill) => {
       this.fills[fill.fillId] = fill;
 
-      const { buyerId, sellerId, price, qty, sellOrderId, buyOrderId } = fill;
+      const { buyOrderInfo, sellOrderInfo, price, symbol, qty } = fill;
+
+      const { buyerId, orderId: buyOrderId } = buyOrderInfo;
+      const { sellerId, orderId: sellOrderId } = sellOrderInfo;
 
       if (!positionUpdates[buyerId])
         positionUpdates[buyerId] = {
           buyOrderId: {
             positionUpdatePriceQtyProduct: 0,
             positionUpdateQty: 0,
+            margin: buyOrderInfo.margin,
+            marginType: buyOrderInfo.marginType,
+            totalQty: buyOrderInfo.totalQty,
+            symbol,
           },
         };
       if (!positionUpdates[sellerId])
@@ -376,6 +396,10 @@ export default class OrderBook {
           sellOrderId: {
             positionUpdatePriceQtyProduct: 0,
             positionUpdateQty: 0,
+            margin: sellOrderInfo.margin,
+            marginType: sellOrderInfo.marginType,
+            totalQty: sellOrderInfo.totalQty,
+            symbol,
           },
         };
 
@@ -393,31 +417,32 @@ export default class OrderBook {
 
     for (const [userId, orderUpdates] of Object.entries(positionUpdates)) {
       for (const [
-        orderId,
-        { positionUpdatePriceQtyProduct, positionUpdateQty },
+        _,
+        {
+          positionUpdatePriceQtyProduct,
+          positionUpdateQty,
+          symbol,
+          totalQty: totalOrderQty,
+          margin,
+          marginType,
+        },
       ] of Object.entries(orderUpdates)) {
-        let currentOrder = this.orders[orderId]!;
-        let symbol = currentOrder.symbol;
         let weighedAvgPrice = positionUpdatePriceQtyProduct / positionUpdateQty;
-        let newPosition = this.positions[userId]?.[symbol]?.[weighedAvgPrice];
+        let newPosition =
+          this.isolatedPositions[userId]?.[symbol]?.[weighedAvgPrice];
+
         let prevLiquidationPrice = newPosition?.liquidationPrice;
         let prevPositionType = newPosition?.type;
 
-        assert(
-          currentOrder,
-          "this order should be insdie order book right now ",
-        ); //
-
         let filledRecentQty = Math.abs(positionUpdateQty);
-        let totalOrderQty = currentOrder.qty;
 
         // doing partial margin filling for diff price positions made by same order
 
         if (!newPosition) {
           newPosition = {
             createdAt: new Date(),
-            margin: (currentOrder.margin * filledRecentQty) / totalOrderQty,
-            marginType: currentOrder.marginType,
+            margin: (margin * filledRecentQty) / totalOrderQty,
+            marginType: marginType,
             price: weighedAvgPrice,
             qty: Math.abs(positionUpdateQty),
             symbol: symbol,
@@ -427,15 +452,10 @@ export default class OrderBook {
           };
         } else {
           // here
-          newPosition.margin +=
-            (currentOrder.margin * filledRecentQty) / totalOrderQty;
+          newPosition.margin += (margin * filledRecentQty) / totalOrderQty;
           newPosition.qty += Math.abs(positionUpdateQty);
           newPosition.type = newPosition.qty >= 0 ? "LONG" : "SHORT";
-          newPosition.marginType =
-            currentOrder.marginType == "CROSS" ||
-            newPosition.marginType == "CROSS"
-              ? "CROSS"
-              : "ISOLATED";
+          newPosition.marginType = marginType;
           newPosition.liquidationPrice = 0;
           // TODO : calculate liquidation price later
           newPosition.symbol;
@@ -445,16 +465,17 @@ export default class OrderBook {
 
         if (newPosition.qty == 0) {
           // remove from positions
-          delete this.positions[userId]?.[symbol]?.[weighedAvgPrice];
+          delete this.isolatedPositions[userId]?.[symbol]?.[weighedAvgPrice];
         } else {
-          if (!this.positions[userId]) {
-            this.positions[userId] = {};
+          if (!this.isolatedPositions[userId]) {
+            this.isolatedPositions[userId] = {};
           }
-          if (!this.positions[userId][symbol]) {
-            this.positions[userId][symbol] = {};
+          if (!this.isolatedPositions[userId][symbol]) {
+            this.isolatedPositions[userId][symbol] = {};
           }
-          if (!this.positions[userId][symbol]![weighedAvgPrice])
-            this.positions[userId]![symbol]![weighedAvgPrice] = newPosition;
+          if (!this.isolatedPositions[userId][symbol]![weighedAvgPrice])
+            this.isolatedPositions[userId]![symbol]![weighedAvgPrice] =
+              newPosition;
         }
 
         let liquidationPrice = newPosition.liquidationPrice;
@@ -550,17 +571,35 @@ export default class OrderBook {
           quantityPriceProductSum += exchangePrice * toExchangeQty;
 
           fillsToReturn.push({
+            buyOrderInfo: {
+              buyerId: side == "BUY" ? userId : frontOrder!.userId,
+              margin: side == "BUY" ? currentOrder.margin : frontOrder!.margin,
+              marginType:
+                side == "BUY"
+                  ? currentOrder.marginType
+                  : frontOrder!.marginType,
+              orderId:
+                side == "BUY" ? currentOrder.orderId : frontOrder!.orderId,
+              totalQty: side == "BUY" ? currentOrder.qty : frontOrder!.qty,
+            },
+
+            sellOrderInfo: {
+              sellerId: side == "SELL" ? userId : frontOrder!.userId,
+              margin: side == "SELL" ? currentOrder.margin : frontOrder!.margin,
+              marginType:
+                side == "SELL"
+                  ? currentOrder.marginType
+                  : frontOrder!.marginType,
+              orderId:
+                side == "SELL" ? currentOrder.orderId : frontOrder!.orderId,
+              totalQty: side == "SELL" ? currentOrder.qty : frontOrder!.qty,
+            },
+
             fillId: crypto.randomUUID(),
             bidPrice: Math.max(frontOrder!.price, currentOrder.price),
-            buyerId: side == "BUY" ? userId : frontOrder!.userId,
-            sellerId: side == "SELL" ? userId : frontOrder!.userId,
             price: exchangePrice,
             qty: toExchangeQty,
             symbol,
-            buyOrderId:
-              side == "BUY" ? currentOrder.orderId : frontOrder!.orderId,
-            sellOrderId:
-              side == "SELL" ? currentOrder.orderId : frontOrder!.orderId,
           });
 
           frontOrder!.filledQty += toExchangeQty;
