@@ -175,13 +175,16 @@ class EngineServer {
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
     try {
-      let { type, side, price, qty, symbol, userId } = engineRequest.payload;
+      let { type, side, price, qty, symbol, userId, margin, marginType } =
+        engineRequest.payload;
       let { status, orderId, fills } = this.matchingEngine.createOrder(
         type,
         side,
         symbol,
         qty,
         userId,
+        margin,
+        marginType,
         price,
       );
       if (status == "REJECTED")

@@ -33,7 +33,6 @@ export default class MatchingEngine {
     margin: number,
     marginType: MARGIN_TYPE,
     price?: number,
-    maxMarketBidSpend?: number,
   ): {
     status: "REJECTED" | "OPEN" | "FILLED";
     orderId?: ORDER_ID;
@@ -42,12 +41,20 @@ export default class MatchingEngine {
     const initialUSDBalance = this.balances.getBalance(userId, "USD") as number;
 
     // check and reduce balance for margin
-    if (price) {
-      let marginNeeded = (price * qty) / this.MAX_LEVERAGE_ALLOWED;
+
+    let marketPrice = 100;
+    let marginNeeded = price
+      ? (price * qty) / this.MAX_LEVERAGE_ALLOWED
+      : (marketPrice * qty) / this.MAX_LEVERAGE_ALLOWED;
+    if (marginNeeded > margin) {
+      return { status: "REJECTED" };
     }
 
-    // place order in orderbook, get back fills
-    let { newOrderId, usersPnlUpdate, totalFilledQuantity } =
+    // lock margin
+    this.balances.removeBalance(userId, "USD", margin);
+
+    // place order in orderbook
+    let { newOrderId, usersPnlUpdate, totalFilledQuantity, fills } =
       this.orderBook.createOrder(
         type,
         side,
@@ -77,7 +84,7 @@ export default class MatchingEngine {
     return {
       status: totalFilledQuantity == qty ? "FILLED" : "OPEN",
       orderId: newOrderId,
-      fills: fillsInfo,
+      fills,
     };
   }
 

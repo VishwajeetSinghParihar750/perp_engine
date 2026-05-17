@@ -232,6 +232,7 @@ export default class OrderBook {
       usersPnlUpdate: pnlUpdates,
       newOrderId: currentOrder.orderId,
       totalFilledQuantity: currentOrder.filledQty,
+      fills: fillsToReturn,
     };
   };
 
@@ -347,6 +348,7 @@ export default class OrderBook {
     return {
       usersPnlUpdate: pnlUpdates,
       newOrderId: currentOrder.orderId,
+      fills: fillsToReturn,
       totalFilledQuantity: currentOrder.filledQty,
     };
   };
@@ -770,6 +772,7 @@ export default class OrderBook {
 
     return {
       usersPnlUpdate: pnlUpdates,
+      fills: fillsToReturn,
       newOrderId: currentOrder.orderId,
       totalFilledQuantity: currentOrder.filledQty,
     };
@@ -801,6 +804,7 @@ export default class OrderBook {
     newOrderId: ORDER_ID;
     totalFilledQuantity: number;
     usersPnlUpdate: Record<string, number>;
+    fills: FILLS_INFO;
   } => {
     let toReturn;
 
