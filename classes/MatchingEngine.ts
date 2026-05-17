@@ -7,10 +7,10 @@ import EventBus from "./EventBus.js";
 export default class MatchingEngine {
   private balances: Balances;
   private orderBook: OrderBook;
-  private eventBus: EventBus;
+
+  private readonly minMarginRequired = 5;
 
   constructor(eventBus: EventBus) {
-    this.eventBus = eventBus;
     this.balances = new Balances();
     this.orderBook = new OrderBook(eventBus);
   }

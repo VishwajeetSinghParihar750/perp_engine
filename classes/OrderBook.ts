@@ -109,7 +109,7 @@ export default class OrderBook {
   // just isolated
   isolatedPositions: Record<
     string,
-    Partial<Record<CURRENCY_SYMBOL, Record<number, POSITION>>>
+    Partial<Record<CURRENCY_SYMBOL, POSITION>>
   > = {}; // this is per user per symbol per price positions
 
   private placeMarketBuyOrder = (
@@ -453,7 +453,7 @@ export default class OrderBook {
         _,
         {
           positionUpdatePriceQtyProduct,
-          positionUpdateQty,
+          positionUpdateQty, // this will be negative for short
           symbol,
           totalQty: totalOrderQty,
           margin,
@@ -461,8 +461,7 @@ export default class OrderBook {
         },
       ] of Object.entries(orderUpdates)) {
         let weighedAvgPrice = positionUpdatePriceQtyProduct / positionUpdateQty;
-        let newPosition =
-          this.isolatedPositions[userId]?.[symbol]?.[weighedAvgPrice];
+        let newPosition = this.isolatedPositions[userId]?.[symbol];
 
         let prevLiquidationPrice = newPosition?.liquidationPrice;
         let prevPositionType = newPosition?.type;
@@ -481,39 +480,73 @@ export default class OrderBook {
             symbol: symbol,
             type: positionUpdateQty >= 0 ? "LONG" : "SHORT",
             userId,
-            liquidationPrice: 0, // TODO : calculate liquidation price later
+            liquidationPrice: 0, //  calculate liquidation price later
           };
         } else {
-          // here
+          let updatedQty = 0;
+          let updatedPrice = 0;
+
+          // TODO
+          let updatedMargin = 0; //
+          let realizedPnl = 0; //
+
+          let curretPositionType = newPosition.type;
+          let orderType = positionUpdateQty >= 0 ? "LONG" : "SHORT";
+
+          if (curretPositionType == orderType) {
+            // do weighed avg
+            updatedQty = newPosition.qty + Math.abs(positionUpdateQty);
+
+            updatedPrice =
+              (Math.abs(positionUpdatePriceQtyProduct) +
+                newPosition.price * newPosition.qty) /
+              updatedQty;
+
+            updatedMargin =
+              newPosition.margin + (margin * filledRecentQty) / totalOrderQty;
+          } else {
+            // reduce qty
+            updatedQty = newPosition.qty - Math.abs(positionUpdateQty);
+
+            if (updatedQty > 0) {
+              updatedPrice =
+                curretPositionType == "LONG"
+                  ? newPosition.price
+                  : weighedAvgPrice;
+            } else if (updatedQty < 0) {
+              updatedPrice =
+                curretPositionType == "LONG"
+                  ? weighedAvgPrice
+                  : newPosition.price;
+            }
+            // what if 0 = we dont give af ignore price,coz it would be removed from positions now
+          }
+
+          newPosition.price = updatedPrice;
           newPosition.margin += (margin * filledRecentQty) / totalOrderQty;
-          newPosition.qty += Math.abs(positionUpdateQty);
+          newPosition.qty = updatedQty;
           newPosition.type = newPosition.qty >= 0 ? "LONG" : "SHORT";
           newPosition.marginType = marginType;
           newPosition.liquidationPrice = 0;
-          // TODO : calculate liquidation price later
+          //  calculate liquidation price later
           newPosition.symbol;
         }
-
-        this.updateLiquidationPrice(newPosition);
 
         // update positions
 
         if (newPosition.qty == 0) {
           // remove from positions
-          delete this.isolatedPositions[userId]?.[symbol]?.[weighedAvgPrice];
+          delete this.isolatedPositions[userId]?.[symbol];
         } else {
+          //
+          this.updateLiquidationPrice(newPosition);
+
           if (!this.isolatedPositions[userId]) {
             this.isolatedPositions[userId] = {};
           }
-          if (!this.isolatedPositions[userId][symbol]) {
-            this.isolatedPositions[userId][symbol] = {};
-          }
-          if (!this.isolatedPositions[userId][symbol]![weighedAvgPrice])
-            this.isolatedPositions[userId]![symbol]![weighedAvgPrice] =
-              newPosition;
-        }
 
-        let liquidationPrice = newPosition.liquidationPrice;
+          this.isolatedPositions[userId]![symbol] = newPosition;
+        }
 
         // rmeove from old liqid level if there
         if (prevLiquidationPrice && prevPositionType) {
@@ -534,12 +567,12 @@ export default class OrderBook {
           }
           let liquidLevel =
             this.liquidPositions[symbol]![newPosition.type]?.getElementByKey(
-              liquidationPrice,
+              newPosition.liquidationPrice,
             ) || new Set<POSITION>();
           liquidLevel.add(newPosition);
 
           this.liquidPositions[symbol]![newPosition.type].setElement(
-            liquidationPrice,
+            newPosition.liquidationPrice,
             liquidLevel,
           );
         }
