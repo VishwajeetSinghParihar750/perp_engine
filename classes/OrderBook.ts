@@ -353,6 +353,20 @@ export default class OrderBook {
     this.depthUpdateOffset.set(symbol, this.depthUpdateOffset.get(symbol)! + 1);
   }
 
+  private updateLiquidationPrice = (position: POSITION) => {
+    const liqudiationLevel = 0.95; // at 5% margin left , liquidate
+
+    const { margin, marginType, qty, price } = position;
+
+    if (marginType == "ISOLATED") {
+      const moneyDelta = margin * liqudiationLevel * -1;
+      let liquidPrice = price + moneyDelta / qty;
+
+      position.liquidationPrice = liquidPrice;
+    } else {
+      // TODO
+    }
+  };
   private updateFillsAndPositions(fills: FILLS_INFO) {
     // there can be position updates at diff price levels for a single user
     // so keep seller id map to orderid to updates
@@ -461,6 +475,8 @@ export default class OrderBook {
           newPosition.symbol;
         }
 
+        this.updateLiquidationPrice(newPosition);
+
         // update positions
 
         if (newPosition.qty == 0) {
@@ -483,7 +499,7 @@ export default class OrderBook {
         // rmeove from old liqid level if there
         if (prevLiquidationPrice && prevPositionType) {
           // then we need to remove from old liquid Position price
-          let liquidLevel = this.liquidPositions?.[symbol]?.[prevPositionType]
+          this.liquidPositions?.[symbol]?.[prevPositionType]
             ?.getElementByKey(prevLiquidationPrice)
             ?.delete(newPosition); // this delets by ref ,so does not matter if its updated newPosition
           //
