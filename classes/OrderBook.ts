@@ -448,11 +448,13 @@ export default class OrderBook {
     // give out partial margin to diff price positions from order
     // and update positions, liquid positions
 
+    let usersPnlUpdate: Record<string, number> = {};
+
     for (const [userId, orderUpdates] of Object.entries(positionUpdates)) {
       for (const [
         _,
         {
-          positionUpdatePriceQtyProduct,
+          positionUpdatePriceQtyProduct, // this will be negative for short
           positionUpdateQty, // this will be negative for short
           symbol,
           totalQty: totalOrderQty,
@@ -467,6 +469,7 @@ export default class OrderBook {
         let prevPositionType = newPosition?.type;
 
         let filledRecentQty = Math.abs(positionUpdateQty);
+        let unrealizedPnl = 0;
 
         // doing partial margin filling for diff price positions made by same order
 
@@ -486,26 +489,20 @@ export default class OrderBook {
           let updatedQty = 0;
           let updatedPrice = 0;
 
-          // TODO
-          let updatedMargin = 0; //
-          let realizedPnl = 0; //
-
           let curretPositionType = newPosition.type;
           let orderType = positionUpdateQty >= 0 ? "LONG" : "SHORT";
 
           if (curretPositionType == orderType) {
-            // do weighed avg
             updatedQty = newPosition.qty + Math.abs(positionUpdateQty);
 
+            // do weighed avg
             updatedPrice =
               (Math.abs(positionUpdatePriceQtyProduct) +
                 newPosition.price * newPosition.qty) /
               updatedQty;
-
-            updatedMargin =
-              newPosition.margin + (margin * filledRecentQty) / totalOrderQty;
           } else {
             // reduce qty
+
             updatedQty = newPosition.qty - Math.abs(positionUpdateQty);
 
             if (updatedQty > 0) {
@@ -519,7 +516,18 @@ export default class OrderBook {
                   ? weighedAvgPrice
                   : newPosition.price;
             }
-            // what if 0 = we dont give af ignore price,coz it would be removed from positions now
+            // else what if 0 = we dont give af ignore price,coz it would be removed from positions now
+
+            // find pnl
+            let qtyForPnl = Math.min(
+              newPosition.qty,
+              Math.abs(positionUpdateQty),
+            );
+
+            unrealizedPnl =
+              (weighedAvgPrice - newPosition.price) *
+              qtyForPnl *
+              (orderType == "LONG" ? 1 : -1);
           }
 
           newPosition.price = updatedPrice;
@@ -535,6 +543,9 @@ export default class OrderBook {
         // update positions
 
         if (newPosition.qty == 0) {
+          // return back their margin
+          unrealizedPnl += newPosition.margin;
+
           // remove from positions
           delete this.isolatedPositions[userId]?.[symbol];
         } else {
@@ -575,9 +586,16 @@ export default class OrderBook {
             newPosition.liquidationPrice,
             liquidLevel,
           );
+        } else {
+          // give back unrealised pnl to user
+          if (!usersPnlUpdate[userId]) usersPnlUpdate[userId] = unrealizedPnl;
+          else usersPnlUpdate[userId] += unrealizedPnl;
         }
       }
     }
+
+    // emit pnl update, matching engine will use
+    this.emitEvent({ type: "users_pnl.updated", data: usersPnlUpdate });
   }
 
   private placeLimitOrder = (currentOrder: ORDER) => {

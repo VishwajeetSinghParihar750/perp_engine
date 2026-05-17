@@ -3,6 +3,8 @@ import Balances from "./Balances.js";
 import type { CURRENCY_SYMBOL, ORDER_ID, SIDE, TYPE } from "../types/order.js";
 import { InsufficientBalanceError } from "./Errors/MatchingEngine.js";
 import EventBus from "./EventBus.js";
+import { getDefaultHighWaterMark } from "node:stream";
+import { string } from "zod";
 
 export default class MatchingEngine {
   private balances: Balances;
@@ -10,8 +12,30 @@ export default class MatchingEngine {
 
   private readonly minMarginRequired = 5;
 
+  private debtForExchange = 0;
+
+  private setupEventHandlers(eventBus: EventBus) {
+    eventBus.on("users_pnl.updated", ({ type, data }) => {
+      Object.entries(data as Record<string, number>).forEach(
+        ([userId, pnl]) => {
+          let bal = this.balances.getBalance(userId, "USD") as number;
+          bal += pnl;
+          this.debtForExchange += Math.abs(Math.min(0, bal));
+          bal = Math.max(0, bal);
+
+          if (pnl > 0) this.balances.addBalance(userId, "USD", pnl);
+          else if (pnl < 0)
+            this.balances.removeBalance(userId, "USD", Math.abs(pnl));
+        },
+      );
+    });
+  }
+
   constructor(eventBus: EventBus) {
     this.balances = new Balances();
+
+    this.setupEventHandlers(eventBus);
+
     this.orderBook = new OrderBook(eventBus);
   }
 
