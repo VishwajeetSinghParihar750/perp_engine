@@ -112,7 +112,6 @@ export default class OrderBook {
     Partial<Record<CURRENCY_SYMBOL, Record<number, POSITION>>>
   > = {}; // this is per user per symbol per price positions
 
-  // todo
   private placeMarketBuyOrder = (
     currentOrder: ORDER,
     maxMarketBidSpend: number,
@@ -727,7 +726,6 @@ export default class OrderBook {
     });
   }
 
-  // todo
   createOrder = (
     type: TYPE,
     side: SIDE,
@@ -779,7 +777,8 @@ export default class OrderBook {
     return toReturn;
   };
 
-  // todo
+  // return the margin thats locked in the order (right ?? )
+  // coz for isolated margin you would remove the margin from their balance, and put in order
   cancelOrder = (
     orderId: ORDER_ID,
   ): {
