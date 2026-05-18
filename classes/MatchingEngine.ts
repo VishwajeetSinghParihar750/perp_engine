@@ -156,5 +156,3 @@ export default class MatchingEngine {
     return this.orderBook.fills;
   }
 }
-
-// TODO : setup event handler for events, which will push to common event bus , which wil push to redis

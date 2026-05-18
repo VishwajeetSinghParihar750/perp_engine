@@ -66,17 +66,20 @@ export default class OrderBook {
   eventBus: EventBus;
   depthUpdateOffset: Map<CURRENCY_SYMBOL, number>;
 
-  private placeMarketBuyOrder = (
-    currentOrder: ORDER,
-    maxMarketBidSpend: number,
-  ) => {
-    const { symbol, side, userId } = currentOrder;
+  private createSymbolOrderbook(symbol: CURRENCY_SYMBOL) {
     if (!this.orderBook[symbol]) {
       this.orderBook[symbol] = {
         ASKS: new OrderedMap(),
         BIDS: new OrderedMap(),
       };
     }
+  }
+
+  private placeMarketBuyOrder = (
+    currentOrder: ORDER,
+    maxMarketBidSpend: number,
+  ) => {
+    const { symbol, side, userId } = currentOrder;
 
     // emit depth update events
     //  find depthUpdateInfo
@@ -91,7 +94,7 @@ export default class OrderBook {
 
     let fillsToReturn: FILLS_INFO = [];
 
-    let oppositeSideOrders = this.orderBook[symbol].ASKS;
+    let oppositeSideOrders = this.orderBook[symbol]!.ASKS;
 
     // try matching as much possible
     while (
@@ -175,17 +178,7 @@ export default class OrderBook {
       }
     }
 
-    let { pnlUpdates } = this.updateFillsAndPositions(fillsToReturn);
-    let marginToReturn =
-      ((currentOrder.qty - currentOrder.filledQty) * currentOrder.margin) /
-      currentOrder.qty;
-
-    if (!pnlUpdates[currentOrder.userId])
-      pnlUpdates[currentOrder.userId] = marginToReturn;
-    else pnlUpdates[currentOrder.userId]! += marginToReturn;
-
     return {
-      usersPnlUpdate: pnlUpdates,
       newOrderId: currentOrder.orderId,
       totalFilledQuantity: currentOrder.filledQty,
       fills: fillsToReturn,
@@ -194,13 +187,6 @@ export default class OrderBook {
 
   private placeMarketSellOrder = (currentOrder: ORDER) => {
     const { symbol, side, userId } = currentOrder;
-
-    if (!this.orderBook[symbol]) {
-      this.orderBook[symbol] = {
-        ASKS: new OrderedMap(),
-        BIDS: new OrderedMap(),
-      };
-    }
 
     // emit depth update events
     //  find depthUpdateInfo
@@ -215,7 +201,7 @@ export default class OrderBook {
 
     let fillsToReturn: FILLS_INFO = [];
 
-    let oppositeSideOrders = this.orderBook[symbol].BIDS;
+    let oppositeSideOrders = this.orderBook[symbol]!.BIDS;
 
     // try matching as much possible
     while (
@@ -238,7 +224,7 @@ export default class OrderBook {
           pendingQty,
         );
 
-        fillsToReturn.push({
+        let newFill = {
           buyOrderInfo: {
             buyerId: side == "BUY" ? userId : frontOrder!.userId,
             margin: side == "BUY" ? currentOrder.margin : frontOrder!.margin,
@@ -263,7 +249,10 @@ export default class OrderBook {
           price: Math.min(frontOrder!.price, currentOrder.price),
           qty: toExchangeQty,
           symbol,
-        });
+        };
+
+        fillsToReturn.push(newFill);
+        this.fills[newFill.fillId] = newFill;
 
         frontOrder!.filledQty += toExchangeQty;
         currentOrder.filledQty += toExchangeQty;
@@ -286,23 +275,9 @@ export default class OrderBook {
       }
     }
 
-    fillsToReturn.forEach((fill) => {
-      this.fills[fill.fillId] = fill;
-    });
-    //
-    let { pnlUpdates } = this.updateFillsAndPositions(fillsToReturn);
-    let marginToReturn =
-      ((currentOrder.qty - currentOrder.filledQty) * currentOrder.margin) /
-      currentOrder.qty;
-
-    if (!pnlUpdates[currentOrder.userId])
-      pnlUpdates[currentOrder.userId] = marginToReturn;
-    else pnlUpdates[currentOrder.userId]! += marginToReturn;
-
     this.emitDepthUpdateEvents(symbol, depthUpdates);
 
     return {
-      usersPnlUpdate: pnlUpdates,
       newOrderId: currentOrder.orderId,
       fills: fillsToReturn,
       totalFilledQuantity: currentOrder.filledQty,
@@ -344,13 +319,6 @@ export default class OrderBook {
   private placeLimitOrder = (currentOrder: ORDER) => {
     let { symbol, side, userId, price } = currentOrder;
 
-    if (!this.orderBook[symbol]) {
-      this.orderBook[symbol] = {
-        ASKS: new OrderedMap(),
-        BIDS: new OrderedMap(),
-      };
-    }
-
     // emit depth update events
     //  find depthUpdateInfo
 
@@ -365,8 +333,8 @@ export default class OrderBook {
     let fillsToReturn: FILLS_INFO = [];
 
     let oppositeSideOrders;
-    if (side == "BUY") oppositeSideOrders = this.orderBook[symbol].ASKS;
-    else oppositeSideOrders = this.orderBook[symbol].BIDS;
+    if (side == "BUY") oppositeSideOrders = this.orderBook[symbol]!.ASKS;
+    else oppositeSideOrders = this.orderBook[symbol]!.BIDS;
 
     // do for weighed avg price
     let quantityPriceProductSum = 0;
@@ -439,8 +407,6 @@ export default class OrderBook {
           currentOrder.filledQty += toExchangeQty;
           topOppositeSidePriceLevel.totalQuantity -= toExchangeQty;
 
-          // update fills
-
           // update depthUpdates for opposite side, current side update will happen with this pending order in end
           depthUpdates[side == "BUY" ? "asks" : "bids"].set(
             topOppositeSidePrice,
@@ -471,14 +437,16 @@ export default class OrderBook {
       let prevPriceLevel: PRICE_LEVEL;
 
       if (side == "BUY")
-        prevPriceLevel = this.orderBook[symbol].BIDS.getElementByKey(price) || {
+        prevPriceLevel = this.orderBook[symbol]!.BIDS.getElementByKey(
+          price,
+        ) || {
           totalQuantity: 0,
           orders: new LinkList(),
         };
       else
         prevPriceLevel = prevPriceLevel = this.orderBook[
           symbol
-        ].ASKS.getElementByKey(price) || {
+        ]!.ASKS.getElementByKey(price) || {
           totalQuantity: 0,
           orders: new LinkList(),
         };
@@ -488,8 +456,8 @@ export default class OrderBook {
 
       // put into orderbook object
       if (side == "BUY") {
-        this.orderBook[symbol].BIDS.setElement(price, prevPriceLevel);
-      } else this.orderBook[symbol].ASKS.setElement(price, prevPriceLevel);
+        this.orderBook[symbol]!.BIDS.setElement(price, prevPriceLevel);
+      } else this.orderBook[symbol]!.ASKS.setElement(price, prevPriceLevel);
 
       // update depthUpdates
       depthUpdates[side == "BUY" ? "bids" : "asks"].set(
@@ -523,6 +491,7 @@ export default class OrderBook {
     });
   }
 
+  // TODO : segregate market and limit orders cleanly
   createOrder = (
     type: TYPE,
     side: SIDE,
@@ -555,6 +524,10 @@ export default class OrderBook {
       status: "OPEN",
     };
 
+    // create orderbook if not alreaddy
+    this.createSymbolOrderbook(currentOrder.symbol);
+
+    //
     if (type == "MARKET") {
       if (side == "BUY")
         toReturn = this.placeMarketBuyOrder(currentOrder, maxMarketBidSpend!);
@@ -566,7 +539,7 @@ export default class OrderBook {
     return toReturn;
   };
 
-  // return the margin thats locked in the order (right ?? )
+  // TODO:  return the margin thats locked in the order (right ?? )
   // coz for isolated margin you would remove the margin from their balance, and put in order
   cancelOrder = (
     orderId: ORDER_ID,
