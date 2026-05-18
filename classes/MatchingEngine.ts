@@ -8,10 +8,14 @@ import type {
   TYPE,
 } from "../types/order.js";
 import EventBus from "./EventBus.js";
+import PositionManager from "./PositionManager.js";
+import RiskEngine from "./RiskEngine.js";
 
 export default class MatchingEngine {
   private balances: Balances;
   private orderBook: OrderBook;
+  private positionManager: PositionManager;
+  private riskEngine: RiskEngine;
 
   private readonly MAX_LEVERAGE_ALLOWED = 5;
 
@@ -20,6 +24,8 @@ export default class MatchingEngine {
   constructor(eventBus: EventBus) {
     this.balances = new Balances();
     this.orderBook = new OrderBook(eventBus);
+    this.positionManager = new PositionManager();
+    this.riskEngine = new RiskEngine(this.orderBook);
   }
 
   createOrder(
@@ -37,14 +43,17 @@ export default class MatchingEngine {
     orderId?: ORDER_ID;
     fills?: FILLS_INFO;
   } {
+    // get initial balance
     const initialUSDBalance = this.balances.getBalance(userId, "USD") as number;
 
     // check and reduce balance for margin
-
-    let marketPrice = 100;
-    let marginNeeded = price
-      ? (price * qty) / this.MAX_LEVERAGE_ALLOWED
-      : (marketPrice * qty) / this.MAX_LEVERAGE_ALLOWED;
+    let marginNeeded = this.riskEngine.getMarginRequired({
+      qty,
+      side,
+      symbol,
+      type,
+      price,
+    });
     if (marginNeeded > margin) {
       return { status: "REJECTED" };
     }
@@ -53,31 +62,23 @@ export default class MatchingEngine {
     this.balances.removeBalance(userId, "USD", margin);
 
     // place order in orderbook
-    let { newOrderId, usersPnlUpdate, totalFilledQuantity, fills } =
-      this.orderBook.createOrder(
-        type,
-        side,
-        symbol,
-        qty,
-        userId,
-        margin,
-        marginType,
-        price,
-        initialUSDBalance,
-      );
+    let { newOrderId, totalFilledQuantity, fills } = this.orderBook.createOrder(
+      type,
+      side,
+      symbol,
+      qty,
+      userId,
+      margin,
+      marginType,
+      price,
+      initialUSDBalance,
+    );
 
-    Object.entries(usersPnlUpdate).forEach(([userId, pnl]) => {
-      let ogBal = this.balances.getBalance(userId, "USD") as number;
-      this.exchangeBalance += Math.min(0, ogBal + pnl);
+    // update users positions based on placed order
+    let { pnlUpdates: usersPnlUpdate } = this.positionManager.applyFills(fills);
 
-      if (pnl > 0) this.balances.addBalance(userId, "USD", pnl);
-      else
-        this.balances.removeBalance(
-          userId,
-          "USD",
-          Math.min(ogBal, Math.abs(pnl)),
-        );
-    });
+    // update users balance based on updated positions
+    this.balances.applyUsersPnl(usersPnlUpdate);
 
     // return new order info
     return {
