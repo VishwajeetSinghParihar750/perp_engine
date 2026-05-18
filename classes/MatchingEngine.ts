@@ -10,12 +10,14 @@ import type {
 import EventBus from "./EventBus.js";
 import PositionManager from "./PositionManager.js";
 import RiskEngine from "./RiskEngine.js";
+import LiquidationEngine from "./LiquidationEngine.js";
 
 export default class MatchingEngine {
   private balances: Balances;
   private orderBook: OrderBook;
   private positionManager: PositionManager;
   private riskEngine: RiskEngine;
+  private liquidationEngine: LiquidationEngine;
 
   private readonly MAX_LEVERAGE_ALLOWED = 5;
 
@@ -26,6 +28,7 @@ export default class MatchingEngine {
     this.orderBook = new OrderBook(eventBus);
     this.positionManager = new PositionManager();
     this.riskEngine = new RiskEngine(this.orderBook);
+    this.liquidationEngine = new LiquidationEngine();
   }
 
   createOrder(
@@ -75,7 +78,8 @@ export default class MatchingEngine {
     );
 
     // update users positions based on placed order
-    let { pnlUpdates: usersPnlUpdate } = this.positionManager.applyFills(fills);
+    let { pnlUpdates: usersPnlUpdate, positionUpdates } =
+      this.positionManager.applyFills(fills);
 
     // update users balance based on updated positions
     this.balances.applyUsersPnl(usersPnlUpdate);

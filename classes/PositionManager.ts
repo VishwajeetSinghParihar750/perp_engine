@@ -4,13 +4,13 @@ import type {
   MARGIN_TYPE,
   POSITION_TYPE,
 } from "../types/order.js";
-import type { POSITION } from "../types/events/positions.js";
+import type { POSITION, POSITION_UPDATES } from "../types/events/positions.js";
 import type { FILLS_INFO } from "./OrderBook.js";
 
-type POSITION_UPDATES = Record<
-  string,
+type ORDER_UPDATES = Record<
+  string, // userid
   Record<
-    string,
+    string, // orderid
     {
       positionUpdatePriceQtyProduct: number;
       positionUpdateQty: number;
@@ -23,25 +23,16 @@ type POSITION_UPDATES = Record<
 >;
 
 class PositionManager {
-  private readonly LIQUIDATION_LEVEL = 0.95; // at 5% margin left , liquidate
-  // new for perp (just for isolated right now)
-  private liquidPositions: Partial<
-    Record<
-      CURRENCY_SYMBOL,
-      Record<POSITION_TYPE, OrderedMap<number, Set<POSITION>>>
-    >
-  > = {}; // this is per symbol per liquidation_price positions
-
   // just isolated
   private isolatedPositions: Record<
-    string,
+    string, // userid
     Partial<Record<CURRENCY_SYMBOL, POSITION>>
   > = {}; // this is per user per symbol per price positions
 
-  private calculatePositionUpdates(fills: FILLS_INFO) {
+  private calculateOrderUpdates(fills: FILLS_INFO) {
     // there can be position updates at diff price levels for a single user
     // so keep seller id map to orderid to updates
-    let positionUpdates: POSITION_UPDATES = {};
+    let orderUpdates: ORDER_UPDATES = {};
 
     //  get positon updates
     fills.forEach((fill) => {
@@ -50,8 +41,8 @@ class PositionManager {
       const { buyerId, orderId: buyOrderId } = buyOrderInfo;
       const { sellerId, orderId: sellOrderId } = sellOrderInfo;
 
-      if (!positionUpdates[buyerId])
-        positionUpdates[buyerId] = {
+      if (!orderUpdates[buyerId])
+        orderUpdates[buyerId] = {
           buyOrderId: {
             positionUpdatePriceQtyProduct: 0,
             positionUpdateQty: 0,
@@ -61,8 +52,8 @@ class PositionManager {
             symbol,
           },
         };
-      if (!positionUpdates[sellerId])
-        positionUpdates[sellerId] = {
+      if (!orderUpdates[sellerId])
+        orderUpdates[sellerId] = {
           sellOrderId: {
             positionUpdatePriceQtyProduct: 0,
             positionUpdateQty: 0,
@@ -73,22 +64,23 @@ class PositionManager {
           },
         };
 
-      positionUpdates[buyerId][buyOrderId]!.positionUpdatePriceQtyProduct +=
+      orderUpdates[buyerId][buyOrderId]!.positionUpdatePriceQtyProduct +=
         price * qty;
-      positionUpdates[buyerId][buyOrderId]!.positionUpdateQty += qty;
+      orderUpdates[buyerId][buyOrderId]!.positionUpdateQty += qty;
 
-      positionUpdates[sellerId][sellOrderId]!.positionUpdatePriceQtyProduct -=
+      orderUpdates[sellerId][sellOrderId]!.positionUpdatePriceQtyProduct -=
         price * qty;
-      positionUpdates[sellerId][sellOrderId]!.positionUpdateQty -= qty;
+      orderUpdates[sellerId][sellOrderId]!.positionUpdateQty -= qty;
     });
 
-    return positionUpdates;
+    return orderUpdates;
   }
-  private applyPositionUpdates(positionUpdates: POSITION_UPDATES) {
+  private applyOderUpdates(orderUpdates: ORDER_UPDATES) {
     //
     let usersPnlUpdate: Record<string, number> = {};
+    let positionUpdates: POSITION_UPDATES = {};
 
-    for (const [userId, orderUpdates] of Object.entries(positionUpdates)) {
+    for (const [userId, orderUpdate] of Object.entries(orderUpdates)) {
       for (const [
         _,
         {
@@ -99,12 +91,9 @@ class PositionManager {
           margin,
           marginType,
         },
-      ] of Object.entries(orderUpdates)) {
+      ] of Object.entries(orderUpdate)) {
         let weighedAvgPrice = positionUpdatePriceQtyProduct / positionUpdateQty;
         let newPosition = this.isolatedPositions[userId]?.[symbol];
-
-        let prevLiquidationPrice = newPosition?.liquidationPrice;
-        let prevPositionType = newPosition?.type;
 
         let filledRecentQty = Math.abs(positionUpdateQty);
         let unrealizedPnl = 0;
@@ -113,6 +102,7 @@ class PositionManager {
 
         if (!newPosition) {
           newPosition = {
+            positionId: crypto.randomUUID(),
             createdAt: new Date(),
             margin: (margin * filledRecentQty) / totalOrderQty,
             marginType: marginType,
@@ -121,7 +111,6 @@ class PositionManager {
             symbol: symbol,
             type: positionUpdateQty >= 0 ? "LONG" : "SHORT",
             userId,
-            liquidationPrice: 0, //  calculate liquidation price later
           };
         } else {
           let updatedQty = 0;
@@ -173,75 +162,47 @@ class PositionManager {
           newPosition.qty = updatedQty;
           newPosition.type = newPosition.qty >= 0 ? "LONG" : "SHORT";
           newPosition.marginType = marginType;
-          newPosition.liquidationPrice = 0;
-          //  calculate liquidation price later
           newPosition.symbol;
         }
 
         // update positions
+        if (!positionUpdates[newPosition.userId]) {
+          positionUpdates[newPosition.userId] = {
+            [newPosition.symbol]: newPosition,
+          };
+        } else
+          positionUpdates[newPosition.userId]![newPosition.symbol] =
+            newPosition;
 
         if (newPosition.qty == 0) {
           // return back their margin
           unrealizedPnl += newPosition.margin;
-
-          // remove from positions
           delete this.isolatedPositions[userId]?.[symbol];
         } else {
-          //
-          this.updateLiquidationPrice(newPosition);
-          newPosition.liquidationPrice= // here we need risk engine ,so most likely a wrong class management
-
-          if (!this.isolatedPositions[userId]) {
+          if (!this.isolatedPositions[userId])
             this.isolatedPositions[userId] = {};
-          }
 
           this.isolatedPositions[userId]![symbol] = newPosition;
         }
 
-        // rmeove from old liqid level if there
-        if (prevLiquidationPrice && prevPositionType) {
-          // then we need to remove from old liquid Position price
-          this.liquidPositions?.[symbol]?.[prevPositionType]
-            ?.getElementByKey(prevLiquidationPrice)
-            ?.delete(newPosition); // this delets by ref ,so does not matter if its updated newPosition
-          //
-        }
-
-        // put into new liquid level
-        if (newPosition.qty != 0) {
-          if (!this.liquidPositions[symbol]) {
-            this.liquidPositions[symbol] = {
-              LONG: new OrderedMap(),
-              SHORT: new OrderedMap(),
-            };
-          }
-          let liquidLevel =
-            this.liquidPositions[symbol]![newPosition.type]?.getElementByKey(
-              newPosition.liquidationPrice,
-            ) || new Set<POSITION>();
-          liquidLevel.add(newPosition);
-
-          this.liquidPositions[symbol]![newPosition.type].setElement(
-            newPosition.liquidationPrice,
-            liquidLevel,
-          );
-        } else {
-          // give back unrealised pnl to user
+        if (unrealizedPnl != 0) {
           if (!usersPnlUpdate[userId]) usersPnlUpdate[userId] = unrealizedPnl;
           else usersPnlUpdate[userId] += unrealizedPnl;
         }
       }
     }
-
-    return { pnlUpdates: usersPnlUpdate };
+    return { pnlUpdates: usersPnlUpdate, positionUpdates };
   }
 
+  // can keep this separate
+  private applyPositionUpdats(postionUpdates: POSITION_UPDATES) {}
+
   applyFills(fills: FILLS_INFO) {
-    let positionUpdates = this.calculatePositionUpdates(fills);
+    let orderUpdates = this.calculateOrderUpdates(fills);
 
-    let usersPnlUpdate = this.applyPositionUpdates(positionUpdates);
+    let { pnlUpdates, positionUpdates } = this.applyOderUpdates(orderUpdates);
 
-    return { pnlUpdates: usersPnlUpdate };
+    return { pnlUpdates, positionUpdates };
   }
 }
 
