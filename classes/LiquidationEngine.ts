@@ -15,12 +15,20 @@ class LiquidationEngine {
   private positions: Record<string, POSITION> = {}; // positions in liquidPosition are ref of this
   private liquidationPrice: Record<string, number> = {}; // position id mapped to price
 
-  // TODO
   private getLiquidationForPosition(positon: POSITION): number {
-    return 100;
+    let canTakeLoss = positon.margin * this.LIQUIDATION_LEVEL;
+
+    // pnl = (newprice - price) * qty
+    // newprice = canTakeLoss  / qty + price
+
+    let newPrice =
+      positon.price +
+      (canTakeLoss / positon.qty) * (positon.type == "LONG" ? 1 : -1);
+
+    return newPrice;
   }
 
-  handlePositionUpdates(positionUpdates: POSITION_UPDATES) {
+  applyPositionUpdates(positionUpdates: POSITION_UPDATES) {
     Object.entries(positionUpdates).forEach(
       ([userId, perSymbolPositonUpdate]) => {
         Object.entries(perSymbolPositonUpdate).forEach(([_, newPosition]) => {

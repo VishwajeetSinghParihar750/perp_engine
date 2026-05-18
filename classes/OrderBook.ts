@@ -491,7 +491,6 @@ export default class OrderBook {
     });
   }
 
-  // TODO : segregate market and limit orders cleanly
   createOrder = (
     type: TYPE,
     side: SIDE,

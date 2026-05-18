@@ -19,10 +19,6 @@ export default class MatchingEngine {
   private riskEngine: RiskEngine;
   private liquidationEngine: LiquidationEngine;
 
-  private readonly MAX_LEVERAGE_ALLOWED = 5;
-
-  private exchangeBalance = 0; // this wil be paid from exchagne insurance fund, if not available deleverage, so for now balance can go negative
-
   constructor(eventBus: EventBus) {
     this.balances = new Balances();
     this.orderBook = new OrderBook(eventBus);
@@ -81,8 +77,11 @@ export default class MatchingEngine {
     let { pnlUpdates: usersPnlUpdate, positionUpdates } =
       this.positionManager.applyFills(fills);
 
-    // update users balance based on updated positions
+    // update users balance based on updated margin/pnl
     this.balances.applyUsersPnl(usersPnlUpdate);
+
+    // change liquidation price for udpated positions
+    this.liquidationEngine.applyPositionUpdates(positionUpdates);
 
     // return new order info
     return {
