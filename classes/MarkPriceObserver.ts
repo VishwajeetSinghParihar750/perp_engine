@@ -62,7 +62,7 @@ class MarkPriceObserver {
         data = JSON.parse(data);
 
         this.eventBus.emit({
-          type: "markprice.udpates",
+          type: "markprice.updates",
           data,
         });
       };

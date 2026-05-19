@@ -1,17 +1,12 @@
 import { OrderedMap } from "js-sdsl";
 import type {
-  ORDER,
   SIDE as ORDER_SIDE,
   TYPE as ORDER_TYPE,
   SIDE,
   TYPE,
 } from "../types/order.js";
 import type { POSITION } from "../types/positions.js";
-import {
-  CURRENCY_SYMBOL_ARRAY,
-  type CURRENCY_SYMBOL,
-  type POSITION_TYPE,
-} from "../types/order.js";
+import { type CURRENCY_SYMBOL, type POSITION_TYPE } from "../types/order.js";
 import type { POSITION_UPDATES } from "../types/positions.js";
 import EventBus from "./EventBus.js";
 import { assert } from "node:console";
@@ -38,7 +33,6 @@ class LiquidationEngine {
     string,
     Map<CURRENCY_SYMBOL, POSITION>
   > = new Map();
-
   private indexPrices: Partial<Record<CURRENCY_SYMBOL, number>> = {};
 
   private positions: Record<string, POSITION> = {}; // positions in liquidPosition are ref of this
@@ -108,19 +102,15 @@ class LiquidationEngine {
 
     if (prevPrice == newPrice) return;
 
-    if (prevPrice < newPrice) {
-      // try liqudiate shorts
+    let positionsMap =
+      this.liquidPositions[symbol]?.[prevPrice < newPrice ? "SHORT" : "LONG"];
 
-      let shorts = this.liquidPositions[symbol]!["SHORT"];
-      while (!shorts.empty()) {
-        let [price, positions] = shorts.front()!;
-        if (price > newPrice) return;
+    while (positionsMap && !positionsMap.empty()) {
+      let [price, positions] = positionsMap.front()!;
+      if (price > newPrice) return;
 
-        // liquidate all positions at this price
-        positions.forEach((position) => this.liquidatePosition(position));
-      }
-    } else {
-      // liquidate longs
+      // liquidate all positions at this price
+      positions.forEach((position) => this.liquidatePosition(position));
     }
   }
 
@@ -143,6 +133,8 @@ class LiquidationEngine {
     this.eventBus.on("markprice.updates", ({ data, type }) => {
       const { E, i, p }: { E: number; i: CURRENCY_SYMBOL; p: string } = data;
       // E is time thing, price is in string
+
+      console.log(data);
 
       if (!this.indexPrices[i]) this.indexPrices[i] = +p;
       else {
