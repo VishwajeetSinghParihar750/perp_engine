@@ -14,12 +14,34 @@ import LiquidationEngine, {
 } from "./LiquidationEngine.js";
 import MarkPriceObserver from "./MarkPriceObserver.js";
 
-export default class MatchingEngine {
+export default class Exchange {
   private balances: Balances;
   private orderBook: OrderBook;
   private positionManager: PositionManager;
   private liquidationEngine: LiquidationEngine;
-  private handleLiquidation = (order: LiquidationOrderInfo) => {};
+
+  //actually balance locking is not needed in this coz order would go through, in multi threaded it wuold be needed
+  private handleLiquidation = (order: LiquidationOrderInfo) => {
+    // lock account for this user id , symbol
+    let { symbol, userId, qty, side, type } = order;
+    this.balances.lockAccount(userId, symbol);
+
+    // place order
+    this.createOrder(
+      type,
+      side,
+      symbol,
+      qty,
+      userId,
+      0,
+      "ISOLATED",
+      undefined,
+      true,
+    );
+
+    // unlock account for this user id , symbol
+    this.balances.unlockAccount(userId, symbol);
+  };
 
   constructor(eventBus: EventBus) {
     new MarkPriceObserver(eventBus);
@@ -49,6 +71,11 @@ export default class MatchingEngine {
     fills?: FILLS_INFO;
   } {
     if (!liquidation) {
+      // check if account locked
+      if (this.balances.isAccountLocked(userId, symbol)) {
+        return { status: "REJECTED" };
+      }
+
       // get initial balance
       let initialUSDBalance = this.balances.getBalance(userId, "USD") as number;
 

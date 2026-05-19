@@ -8,6 +8,19 @@ export default class BalanceManager {
   > = {}; // userid to symbol to balance
   private exchangeBalance = 100000000;
 
+  private lockedAccounts: Partial<Record<CURRENCY_SYMBOL, Set<string>>> = {};
+
+  lockAccount(userId: string, symbol: CURRENCY_SYMBOL) {
+    if (!this.lockedAccounts[symbol]) this.lockedAccounts[symbol] = new Set();
+    this.lockedAccounts[symbol].add(userId);
+  }
+  unlockAccount(userId: string, symbol: CURRENCY_SYMBOL) {
+    this.lockedAccounts?.[symbol]?.delete(userId);
+  }
+  isAccountLocked(userId: string, symbol: CURRENCY_SYMBOL): boolean {
+    return this.lockedAccounts?.[symbol]?.has(userId) ? true : false;
+  }
+
   getBalance = (userId: string, symbol: CURRENCY_SYMBOL | undefined) => {
     if (symbol) return this.perSymbolBalances[userId]?.[symbol] || 0;
     return this.perSymbolBalances[userId];

@@ -1,6 +1,6 @@
 import { createClient, type RedisClientType } from "redis";
 import EventBus from "./EventBus.js";
-import MatchingEngine from "./MatchingEngine.js";
+import MatchingEngine from "./Exchange.js";
 
 type ENGINE_REQUEST_TYPE =
   | "create_order"

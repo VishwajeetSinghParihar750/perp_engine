@@ -24,9 +24,8 @@ type LiquidationOrderInfo = {
   userId: string;
 };
 class LiquidationEngine {
-  //
-
   private readonly LIQUIDATION_LEVEL = 0.95; // at 5% margin left , liquidate
+
   private liquidPositions: Partial<
     Record<
       CURRENCY_SYMBOL,
