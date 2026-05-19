@@ -95,35 +95,26 @@ export default class MatchingEngine {
     status: "CANCELLED" | "ALREADY_FILLED" | "NOT_CANCELLABLE";
   } {
     try {
-      // try cancelling order
-      // get pendign fills and abort it
+      // try caneling
       const { status, order } = this.orderBook.cancelOrder(orderId);
 
       if (status == "NOT_CANCELLABLE") {
         return { status: "NOT_CANCELLABLE" };
       }
 
-      const { filledQuantity, totalQuantity, price, side, userId, symbol } =
-        order!;
+      const { filledQty, qty, margin, userId } = order!;
 
-      if (filledQuantity == totalQuantity) {
+      if (filledQty == qty) {
         return { status: "ALREADY_FILLED" };
       }
 
-      // return back balances
-      if (side == "BUY") {
-        this.balances.addBalance(
-          userId,
-          "USD",
-          totalQuantity * price - filledQuantity * price,
-        );
-      } else {
-        this.balances.addBalance(
-          userId,
-          symbol,
-          totalQuantity - filledQuantity,
-        );
-      }
+      // if cancelled return margin locked still
+      this.balances.addBalance(
+        userId,
+        "USD",
+        (margin * (qty - filledQty)) / qty,
+      );
+
       return {
         status: "CANCELLED",
       };

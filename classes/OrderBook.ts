@@ -538,19 +538,15 @@ export default class OrderBook {
     return toReturn;
   };
 
-  // TODO:  return the margin thats locked in the order (right ?? )
-  // coz for isolated margin you would remove the margin from their balance, and put in order
   cancelOrder = (
     orderId: ORDER_ID,
   ): {
     status: "NOT_CANCELLABLE" | "CANCELLED";
     order?: {
-      filledQuantity: number;
-      totalQuantity: number;
-      price: number;
-      side: SIDE;
+      filledQty: number;
+      qty: number;
+      margin: number;
       userId: string;
-      symbol: CURRENCY_SYMBOL;
     };
   } => {
     //
@@ -596,6 +592,7 @@ export default class OrderBook {
           this.orderBook[currentOrder.symbol]!.ASKS.eraseElementByKey(
             currentOrder.price,
           );
+      return { status: "CANCELLED", order: currentOrder };
     }
     return { status: "NOT_CANCELLABLE" };
   };
