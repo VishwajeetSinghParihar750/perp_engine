@@ -1,4 +1,5 @@
 import { OrderedMap } from "js-sdsl";
+import type { SIDE as ORDER_SIDE, TYPE as ORDER_TYPE } from "../types/order.js";
 import type { POSITION } from "../types/positions.js";
 import {
   CURRENCY_SYMBOL_ARRAY,
@@ -23,6 +24,10 @@ class LiquidationEngine {
 
   private positions: Record<string, POSITION> = {}; // positions in liquidPosition are ref of this
   private liquidationPrice: Record<string, number> = {}; // position id mapped to price
+
+  constructor(eventBus: EventBus) {
+    this.handlePriceUpdates(eventBus);
+  }
 
   private liquidatePosition(positionId: string) {
     let positon = this.positions[positionId];
@@ -50,6 +55,20 @@ class LiquidationEngine {
       // liquidate longs
     }
   }
+
+  private getLiquidationForPosition(positon: POSITION): number {
+    let canTakeLoss = positon.margin * this.LIQUIDATION_LEVEL;
+
+    // pnl = (newprice - price) * qty
+    // newprice = canTakeLoss  / qty + price
+
+    let newPrice =
+      positon.price +
+      (canTakeLoss / positon.qty) * (positon.type == "LONG" ? 1 : -1);
+
+    return newPrice;
+  }
+
   handlePriceUpdates(eventBus: EventBus) {
     // TODO :  get initial prices first through http, then update prices with ws later,  wait for getting requests until your prices are  set up
 
@@ -64,21 +83,15 @@ class LiquidationEngine {
       }
     });
   }
-  constructor(eventBus: EventBus) {
-    this.handlePriceUpdates(eventBus);
-  }
 
-  private getLiquidationForPosition(positon: POSITION): number {
-    let canTakeLoss = positon.margin * this.LIQUIDATION_LEVEL;
-
-    // pnl = (newprice - price) * qty
-    // newprice = canTakeLoss  / qty + price
-
-    let newPrice =
-      positon.price +
-      (canTakeLoss / positon.qty) * (positon.type == "LONG" ? 1 : -1);
-
-    return newPrice;
+  getMarginRequired(order: {
+    symbol: CURRENCY_SYMBOL;
+    qty: number;
+    type: ORDER_TYPE;
+    side: ORDER_SIDE;
+    price: number | undefined;
+  }): number {
+    return 0;
   }
 
   applyPositionUpdates(positionUpdates: POSITION_UPDATES) {

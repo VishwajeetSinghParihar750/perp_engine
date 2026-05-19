@@ -9,7 +9,6 @@ import type {
 } from "../types/order.js";
 import EventBus from "./EventBus.js";
 import PositionManager from "./PositionManager.js";
-import RiskEngine from "./RiskEngine.js";
 import LiquidationEngine from "./LiquidationEngine.js";
 import MarkPriceObserver from "./MarkPriceObserver.js";
 
@@ -17,7 +16,6 @@ export default class MatchingEngine {
   private balances: Balances;
   private orderBook: OrderBook;
   private positionManager: PositionManager;
-  private riskEngine: RiskEngine;
   private liquidationEngine: LiquidationEngine;
   private markpriceObserver: MarkPriceObserver;
 
@@ -26,7 +24,6 @@ export default class MatchingEngine {
     this.balances = new Balances();
     this.orderBook = new OrderBook(eventBus);
     this.positionManager = new PositionManager();
-    this.riskEngine = new RiskEngine(this.orderBook);
     this.liquidationEngine = new LiquidationEngine(eventBus);
   }
 
@@ -49,7 +46,7 @@ export default class MatchingEngine {
     const initialUSDBalance = this.balances.getBalance(userId, "USD") as number;
 
     // check and reduce balance for margin
-    let marginNeeded = this.riskEngine.getMarginRequired({
+    let marginNeeded = this.liquidationEngine.getMarginRequired({
       qty,
       side,
       symbol,
