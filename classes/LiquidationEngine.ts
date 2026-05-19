@@ -35,12 +35,36 @@ class LiquidationEngine {
   > = {}; // this is per symbol per liquidation_price positions
   private eventBus: EventBus;
 
+  private positionsBeingLiquidated: Map<
+    string,
+    Map<CURRENCY_SYMBOL, POSITION>
+  > = new Map();
+
   private indexPrices: Partial<Record<CURRENCY_SYMBOL, number>> = {};
 
   private positions: Record<string, POSITION> = {}; // positions in liquidPosition are ref of this
   private liquidationPrice: Record<string, number> = {}; // position id mapped to price
 
   private requestLiquidation: (order: LiquidationOrderInfo) => void;
+
+  private keepTryingLiquidation = (positionId: string) => {
+    // every 2s keep putting margin order until filled
+
+    let curPosition = this.positions[positionId];
+    if (curPosition) {
+      this.requestLiquidation({
+        qty: curPosition.qty,
+        side: curPosition.type == "LONG" ? "SELL" : "BUY",
+        symbol: curPosition.symbol,
+        type: "MARKET",
+        userId: curPosition.userId,
+      });
+      setTimeout(() => {
+        this.keepTryingLiquidation(positionId);
+      }, 2000);
+    }
+    // else filled already
+  };
 
   constructor(
     eventBus: EventBus,
@@ -64,28 +88,21 @@ class LiquidationEngine {
       },
     });
 
-    // first send market order, if filled great
-    const sendLiquidationRequest = () => {
-      // every 2s keep putting margin order until filled
+    // plave in beingLiquidatedPositions
+    delete this.positions[positionId];
+    let positionSet = this.liquidPositions[position.symbol]![
+      position.type
+    ].getElementByKey(position.price)!;
 
-      let curPosition = this.positions[positionId];
-      if (curPosition) {
-        this.requestLiquidation({
-          qty: curPosition.qty,
-          side: curPosition.type == "LONG" ? "SELL" : "BUY",
-          symbol: curPosition.symbol,
-          type: "MARKET",
-          userId: curPosition.userId,
-        });
-        setTimeout(() => {
-          sendLiquidationRequest();
-        }, 2000);
-      }
-      // else filled already
-    };
+    positionSet.delete(position.positionId);
+
+    this.positionsBeingLiquidated.getOrInsert(
+      position.userId,
+      new Map([[position.symbol, position]]),
+    );
 
     // keep placing margin orders for this until fully filled
-    sendLiquidationRequest();
+    this.keepTryingLiquidation(position.positionId);
   }
   private handlePriceUpdate(symbol: CURRENCY_SYMBOL, newPrice: number) {
     let prevPrice = this.indexPrices[symbol]!;
@@ -146,10 +163,36 @@ class LiquidationEngine {
     return 0;
   }
 
+  // TODO : remove all data strcures and clear empty ds, and similarly in normal position udpats
+  private handlePositonUpdateLiquidation(position: POSITION) {
+    if (position.qty == 0) {
+      // remmove from all data strctures
+      let set = this.liquidPositions[position.symbol]![
+        position.type
+      ].getElementByKey(position.price)!;
+      set.delete(position.positionId);
+
+      if (set.size == 0) {
+        this.liquidPositions[position.symbol]?.[
+          position.type
+        ]?.eraseElementByKey(position.price);
+      }
+    }
+  }
+
   applyPositionUpdates(positionUpdates: POSITION_UPDATES) {
     Object.entries(positionUpdates).forEach(
       ([userId, perSymbolPositonUpdate]) => {
         Object.entries(perSymbolPositonUpdate).forEach(([_, newPosition]) => {
+          let beingLiquidated = this.positionsBeingLiquidated
+            .get(userId)
+            ?.get(newPosition.symbol);
+
+          if (beingLiquidated) {
+            this.handlePositonUpdateLiquidation(newPosition);
+            return;
+          }
+
           let prevPosition = this.positions[newPosition.positionId];
 
           // remove from prev lqiudi position

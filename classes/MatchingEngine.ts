@@ -19,9 +19,7 @@ export default class MatchingEngine {
   private orderBook: OrderBook;
   private positionManager: PositionManager;
   private liquidationEngine: LiquidationEngine;
-  private handleLiquidation = (order: LiquidationOrderInfo) => {
-    //
-  };
+  private handleLiquidation = (order: LiquidationOrderInfo) => {};
 
   constructor(eventBus: EventBus) {
     new MarkPriceObserver(eventBus);
@@ -50,15 +48,14 @@ export default class MatchingEngine {
     orderId?: ORDER_ID;
     fills?: FILLS_INFO;
   } {
-    let initialUSDBalance = this.balances.getBalance(userId, "USD") as number;
-
-    // check if have claimed margin
-    if (margin > initialUSDBalance) {
-      return { status: "REJECTED" };
-    }
-
     if (!liquidation) {
       // get initial balance
+      let initialUSDBalance = this.balances.getBalance(userId, "USD") as number;
+
+      // check if have claimed margin
+      if (margin > initialUSDBalance) {
+        return { status: "REJECTED" };
+      }
 
       // check and reduce balance for margin
       let marginNeeded = this.liquidationEngine.getMarginRequired({
