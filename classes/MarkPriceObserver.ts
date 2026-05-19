@@ -17,6 +17,7 @@ class MarkPriceObserver {
   private readonly streamPairs: string[] = [
     "btcusd@indexPrice",
     "solusd@indexPrice",
+    "ethusd@indexPrice",
   ];
   private eventBus: EventBus;
 
@@ -36,8 +37,6 @@ class MarkPriceObserver {
       this.BINANCE_SUBSCIRPTION_REQUEST.params.push(streamPair);
     });
 
-    // TODO  : here we shoudl wait for response ideallly
-
     ws.onopen = (ev) => {
       // send sub request
       console.log("binance ws server connection oopned ", ev);
@@ -51,13 +50,14 @@ class MarkPriceObserver {
     };
 
     ws.onmessage = ({ data }) => {
-      console.log("binance ws server connection sent message  ", data);
+      // console.log("binance ws server connection sent message  ", data);
+
       data = JSON.parse(data);
 
       assert(!data.error && data.id == 1);
 
       ws.onmessage = ({ data }) => {
-        console.log("binance ws server connection sent message  ", data);
+        // console.log("binance ws server connection sent message  ", data);
 
         data = JSON.parse(data);
 
@@ -67,14 +67,6 @@ class MarkPriceObserver {
         });
       };
     };
-
-    // on message braodcast to event bus
-    // ws.onmessage = (ev) => {
-    //   this.eventBus.emit({
-    //     type: "markprice.udpates",
-    //     data: ev,
-    //   });
-    // };
   }
 }
 export default MarkPriceObserver;

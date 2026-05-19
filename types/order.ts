@@ -1,4 +1,4 @@
-const CURRENCY_SYMBOL_ARRAY = ["USD", "SOL", "ETH", "BTC"] as const;
+const CURRENCY_SYMBOL_ARRAY = ["USD", "SOLUSD", "ETHUSD", "BTCUSD"] as const;
 type CURRENCY_SYMBOL = (typeof CURRENCY_SYMBOL_ARRAY)[number];
 type TYPE = "LIMIT" | "MARKET";
 type SIDE = "BUY" | "SELL";
