@@ -9,7 +9,9 @@ import type {
 } from "../types/order.js";
 import EventBus from "./EventBus.js";
 import PositionManager from "./PositionManager.js";
-import LiquidationEngine from "./LiquidationEngine.js";
+import LiquidationEngine, {
+  type LiquidationOrderInfo,
+} from "./LiquidationEngine.js";
 import MarkPriceObserver from "./MarkPriceObserver.js";
 
 export default class MatchingEngine {
@@ -17,14 +19,19 @@ export default class MatchingEngine {
   private orderBook: OrderBook;
   private positionManager: PositionManager;
   private liquidationEngine: LiquidationEngine;
-  private markpriceObserver: MarkPriceObserver;
+  private handleLiquidation = (order: LiquidationOrderInfo) => {
+    //
+  };
 
   constructor(eventBus: EventBus) {
-    this.markpriceObserver = new MarkPriceObserver(eventBus);
+    new MarkPriceObserver(eventBus);
     this.balances = new Balances();
     this.orderBook = new OrderBook(eventBus);
     this.positionManager = new PositionManager();
-    this.liquidationEngine = new LiquidationEngine(eventBus);
+    this.liquidationEngine = new LiquidationEngine(
+      eventBus,
+      this.handleLiquidation,
+    );
   }
 
   createOrder(
@@ -37,28 +44,37 @@ export default class MatchingEngine {
     margin: number,
     marginType: MARGIN_TYPE,
     price?: number,
+    liquidation?: boolean,
   ): {
     status: "REJECTED" | "OPEN" | "FILLED";
     orderId?: ORDER_ID;
     fills?: FILLS_INFO;
   } {
-    // get initial balance
-    const initialUSDBalance = this.balances.getBalance(userId, "USD") as number;
+    let initialUSDBalance = this.balances.getBalance(userId, "USD") as number;
 
-    // check and reduce balance for margin
-    let marginNeeded = this.liquidationEngine.getMarginRequired({
-      qty,
-      side,
-      symbol,
-      type,
-      price,
-    });
-    if (marginNeeded > margin) {
+    // check if have claimed margin
+    if (margin > initialUSDBalance) {
       return { status: "REJECTED" };
     }
 
-    // lock margin
-    this.balances.removeBalance(userId, "USD", margin);
+    if (!liquidation) {
+      // get initial balance
+
+      // check and reduce balance for margin
+      let marginNeeded = this.liquidationEngine.getMarginRequired({
+        qty,
+        side,
+        symbol,
+        type,
+        price,
+      });
+      if (marginNeeded > margin) {
+        return { status: "REJECTED" };
+      }
+
+      // lock margin
+      this.balances.removeBalance(userId, "USD", margin);
+    }
 
     // place order in orderbook
     let { newOrderId, totalFilledQuantity, fills } = this.orderBook.createOrder(
@@ -70,7 +86,6 @@ export default class MatchingEngine {
       margin,
       marginType,
       price,
-      initialUSDBalance,
     );
 
     // update users positions based on placed order

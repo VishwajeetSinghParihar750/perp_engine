@@ -75,10 +75,7 @@ export default class OrderBook {
     }
   }
 
-  private placeMarketBuyOrder = (
-    currentOrder: ORDER,
-    maxMarketBidSpend: number,
-  ) => {
+  private placeMarketBuyOrder = (currentOrder: ORDER) => {
     const { symbol, side, userId } = currentOrder;
 
     // emit depth update events
@@ -99,8 +96,7 @@ export default class OrderBook {
     // try matching as much possible
     while (
       !oppositeSideOrders.empty() &&
-      currentOrder.filledQty < currentOrder.qty &&
-      maxMarketBidSpend > 0
+      currentOrder.filledQty < currentOrder.qty
     ) {
       let [topOppositeSidePrice, topOppositeSidePriceLevel] =
         oppositeSideOrders.front()!;
@@ -113,15 +109,9 @@ export default class OrderBook {
         let frontOrder = orders.front();
         let pendingQty = frontOrder!.qty - frontOrder!.filledQty;
 
-        let maxExchangeQty = Math.min(
+        let toExchangeQty = Math.min(
           currentOrder.qty - currentOrder.filledQty,
           pendingQty,
-        );
-
-        // TODO : HANDLE FLOATING POINT ERRORS HERE COZ OF DIVIDING
-        let toExchangeQty = Math.min(
-          maxExchangeQty,
-          maxMarketBidSpend / frontOrder!.price,
         );
 
         fillsToReturn.push({
@@ -166,11 +156,6 @@ export default class OrderBook {
           delete this.orders[frontOrder!.orderId];
           orders.popFront();
         }
-
-        if (maxExchangeQty > toExchangeQty) {
-          maxMarketBidSpend = 0;
-          break;
-        } else maxMarketBidSpend -= frontOrder!.price * toExchangeQty;
       }
 
       if (orders.empty()) {
@@ -288,7 +273,7 @@ export default class OrderBook {
     //  emit depthUpdateEvent on  eventBus
     //  maintain depthUpdateOffset
     switch (symbol) {
-      case "BTC":
+      case "BTCUSD":
         this.emitEvent({
           type: "depth.updated.btc_usd",
           data: {
@@ -299,7 +284,7 @@ export default class OrderBook {
 
         break;
 
-      case "SOL":
+      case "SOLUSD":
         this.emitEvent({
           type: "depth.updated.sol_usd",
           data: {
@@ -500,7 +485,6 @@ export default class OrderBook {
     margin: number,
     marginType: MARGIN_TYPE,
     price?: number,
-    maxMarketBidSpend?: number,
   ): {
     newOrderId: ORDER_ID;
     totalFilledQuantity: number;
@@ -528,8 +512,7 @@ export default class OrderBook {
 
     //
     if (type == "MARKET") {
-      if (side == "BUY")
-        toReturn = this.placeMarketBuyOrder(currentOrder, maxMarketBidSpend!);
+      if (side == "BUY") toReturn = this.placeMarketBuyOrder(currentOrder);
       else toReturn = this.placeMarketSellOrder(currentOrder);
     } else {
       toReturn = this.placeLimitOrder(currentOrder);

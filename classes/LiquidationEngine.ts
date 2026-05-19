@@ -1,5 +1,11 @@
 import { OrderedMap } from "js-sdsl";
-import type { SIDE as ORDER_SIDE, TYPE as ORDER_TYPE } from "../types/order.js";
+import type {
+  ORDER,
+  SIDE as ORDER_SIDE,
+  TYPE as ORDER_TYPE,
+  SIDE,
+  TYPE,
+} from "../types/order.js";
 import type { POSITION } from "../types/positions.js";
 import {
   CURRENCY_SYMBOL_ARRAY,
@@ -10,6 +16,13 @@ import type { POSITION_UPDATES } from "../types/positions.js";
 import EventBus from "./EventBus.js";
 import { assert } from "node:console";
 
+type LiquidationOrderInfo = {
+  type: TYPE;
+  side: SIDE;
+  symbol: CURRENCY_SYMBOL;
+  qty: number;
+  userId: string;
+};
 class LiquidationEngine {
   //
 
@@ -27,7 +40,13 @@ class LiquidationEngine {
   private positions: Record<string, POSITION> = {}; // positions in liquidPosition are ref of this
   private liquidationPrice: Record<string, number> = {}; // position id mapped to price
 
-  constructor(eventBus: EventBus) {
+  private requestLiquidation: (order: LiquidationOrderInfo) => void;
+
+  constructor(
+    eventBus: EventBus,
+    requestLiquidation: (order: LiquidationOrderInfo) => void,
+  ) {
+    this.requestLiquidation = requestLiquidation;
     this.eventBus = eventBus;
     this.handlePriceUpdates();
   }
@@ -45,33 +64,28 @@ class LiquidationEngine {
       },
     });
 
-    // keep placing margin orders for this until fully filled
+    // first send market order, if filled great
+    const sendLiquidationRequest = () => {
+      // every 2s keep putting margin order until filled
 
-    let sendLiquidationcCompleteEvent = (pnl: number) => {
-      this.eventBus.emit({
-        type: "liquidation.completed",
-        data: {
-          userId: position.userId,
-          symbol: position.symbol,
-          pnl,
-        },
-      });
+      let curPosition = this.positions[positionId];
+      if (curPosition) {
+        this.requestLiquidation({
+          qty: curPosition.qty,
+          side: curPosition.type == "LONG" ? "SELL" : "BUY",
+          symbol: curPosition.symbol,
+          type: "MARKET",
+          userId: curPosition.userId,
+        });
+        setTimeout(() => {
+          sendLiquidationRequest();
+        }, 2000);
+      }
+      // else filled already
     };
 
-    let filled = false;
-    let pnl = 100;
-
-    // first send market order, if filled great
-    // else
-    if (!filled)
-      setTimeout(() => {
-        // every 2s keep putting margin order until filled
-        // how to place order from here ??
-      }, 2000);
-    else {
-      // send liquidation complete event
-      sendLiquidationcCompleteEvent(pnl);
-    }
+    // keep placing margin orders for this until fully filled
+    sendLiquidationRequest();
   }
   private handlePriceUpdate(symbol: CURRENCY_SYMBOL, newPrice: number) {
     let prevPrice = this.indexPrices[symbol]!;
@@ -189,3 +203,4 @@ class LiquidationEngine {
   }
 }
 export default LiquidationEngine;
+export type { LiquidationOrderInfo };
