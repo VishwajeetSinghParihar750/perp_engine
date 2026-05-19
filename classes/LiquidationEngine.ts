@@ -7,7 +7,8 @@ import {
   type POSITION_TYPE,
 } from "../types/order.js";
 import type { POSITION_UPDATES } from "../types/positions.js";
-import type EventBus from "./EventBus.js";
+import EventBus from "./EventBus.js";
+import { assert } from "node:console";
 
 class LiquidationEngine {
   //
@@ -19,6 +20,7 @@ class LiquidationEngine {
       Record<POSITION_TYPE, OrderedMap<number, Set<string>>>
     >
   > = {}; // this is per symbol per liquidation_price positions
+  private eventBus: EventBus;
 
   private indexPrices: Partial<Record<CURRENCY_SYMBOL, number>> = {};
 
@@ -26,14 +28,50 @@ class LiquidationEngine {
   private liquidationPrice: Record<string, number> = {}; // position id mapped to price
 
   constructor(eventBus: EventBus) {
-    this.handlePriceUpdates(eventBus);
+    this.eventBus = eventBus;
+    this.handlePriceUpdates();
   }
 
   private liquidatePosition(positionId: string) {
-    let positon = this.positions[positionId];
+    let position = this.positions[positionId]!;
+    assert(position);
 
     // lock the positoin for this symbol for this user
+    this.eventBus.emit({
+      type: "liquidation.started",
+      data: {
+        userId: position.userId,
+        symbol: position.symbol,
+      },
+    });
+
     // keep placing margin orders for this until fully filled
+
+    let sendLiquidationcCompleteEvent = (pnl: number) => {
+      this.eventBus.emit({
+        type: "liquidation.completed",
+        data: {
+          userId: position.userId,
+          symbol: position.symbol,
+          pnl,
+        },
+      });
+    };
+
+    let filled = false;
+    let pnl = 100;
+
+    // first send market order, if filled great
+    // else
+    if (!filled)
+      setTimeout(() => {
+        // every 2s keep putting margin order until filled
+        // how to place order from here ??
+      }, 2000);
+    else {
+      // send liquidation complete event
+      sendLiquidationcCompleteEvent(pnl);
+    }
   }
   private handlePriceUpdate(symbol: CURRENCY_SYMBOL, newPrice: number) {
     let prevPrice = this.indexPrices[symbol]!;
@@ -69,10 +107,10 @@ class LiquidationEngine {
     return newPrice;
   }
 
-  handlePriceUpdates(eventBus: EventBus) {
+  private handlePriceUpdates() {
     // TODO :  get initial prices first through http, then update prices with ws later,  wait for getting requests until your prices are  set up
 
-    eventBus.on("markprice.udpates", ({ data, type }) => {
+    this.eventBus.on("markprice.updates", ({ data, type }) => {
       const { E, i, p }: { E: number; i: CURRENCY_SYMBOL; p: string } = data;
       // E is time thing, price is in string
 
