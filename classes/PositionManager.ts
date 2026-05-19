@@ -4,7 +4,7 @@ import type {
   MARGIN_TYPE,
   POSITION_TYPE,
 } from "../types/order.js";
-import type { POSITION, POSITION_UPDATES } from "../types/events/positions.js";
+import type { POSITION, POSITION_UPDATES } from "../types/positions.js";
 import type { FILLS_INFO } from "./OrderBook.js";
 
 type ORDER_UPDATES = Record<

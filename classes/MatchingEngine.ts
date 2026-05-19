@@ -11,6 +11,7 @@ import EventBus from "./EventBus.js";
 import PositionManager from "./PositionManager.js";
 import RiskEngine from "./RiskEngine.js";
 import LiquidationEngine from "./LiquidationEngine.js";
+import MarkPriceObserver from "./MarkPriceObserver.js";
 
 export default class MatchingEngine {
   private balances: Balances;
@@ -18,13 +19,15 @@ export default class MatchingEngine {
   private positionManager: PositionManager;
   private riskEngine: RiskEngine;
   private liquidationEngine: LiquidationEngine;
+  private markpriceObserver: MarkPriceObserver;
 
   constructor(eventBus: EventBus) {
+    this.markpriceObserver = new MarkPriceObserver(eventBus);
     this.balances = new Balances();
     this.orderBook = new OrderBook(eventBus);
     this.positionManager = new PositionManager();
     this.riskEngine = new RiskEngine(this.orderBook);
-    this.liquidationEngine = new LiquidationEngine();
+    this.liquidationEngine = new LiquidationEngine(eventBus);
   }
 
   createOrder(

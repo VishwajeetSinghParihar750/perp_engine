@@ -1,4 +1,4 @@
-import type { CURRENCY_SYMBOL, MARGIN_TYPE, POSITION_TYPE } from "../order.js";
+import type { CURRENCY_SYMBOL, MARGIN_TYPE, POSITION_TYPE } from "./order.js";
 
 type POSITION = {
   positionId: string;

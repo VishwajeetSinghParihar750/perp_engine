@@ -1,4 +1,4 @@
-import type { POSITION } from "../types/events/positions.js";
+import type { POSITION } from "../types/positions.js";
 import {
   CURRENCY_SYMBOL_ARRAY,
   type CURRENCY_SYMBOL,

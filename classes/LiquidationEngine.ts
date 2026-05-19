@@ -1,10 +1,12 @@
 import { OrderedMap } from "js-sdsl";
-import type { POSITION } from "../types/events/positions.js";
+import type { POSITION } from "../types/positions.js";
 import type { CURRENCY_SYMBOL, POSITION_TYPE } from "../types/order.js";
-import type { POSITION_UPDATES } from "../types/events/positions.js";
+import type { POSITION_UPDATES } from "../types/positions.js";
+import type EventBus from "./EventBus.js";
 
 class LiquidationEngine {
   //
+
   private readonly LIQUIDATION_LEVEL = 0.95; // at 5% margin left , liquidate
   private liquidPositions: Partial<
     Record<
@@ -14,6 +16,16 @@ class LiquidationEngine {
   > = {}; // this is per symbol per liquidation_price positions
   private positions: Record<string, POSITION> = {}; // positions in liquidPosition are ref of this
   private liquidationPrice: Record<string, number> = {}; // position id mapped to price
+
+  handlePriceUpdates(eventBus: EventBus) {
+    eventBus.on("markprice.udpates", (event) => {
+      //
+      console.log("liquidatoin engine recieved event : ", event);
+    });
+  }
+  constructor(eventBus: EventBus) {
+    this.handlePriceUpdates(eventBus);
+  }
 
   private getLiquidationForPosition(positon: POSITION): number {
     let canTakeLoss = positon.margin * this.LIQUIDATION_LEVEL;
