@@ -163,10 +163,12 @@ class LiquidationEngine {
     return 0;
   }
 
-  // TODO : remove all data strcures and clear empty ds, and similarly in normal position udpats
+  //  remove all data strcures and clear empty ds, and similarly in normal position udpats
   private handlePositonUpdateLiquidation(position: POSITION) {
     if (position.qty == 0) {
       // remmove from all data strctures
+
+      // remove from liqudi positiosn
       let set = this.liquidPositions[position.symbol]![
         position.type
       ].getElementByKey(position.price)!;
@@ -177,7 +179,14 @@ class LiquidationEngine {
           position.type
         ]?.eraseElementByKey(position.price);
       }
+
+      // remove from others
+      delete this.liquidationPrice[position.positionId];
+      delete this.positions[position.positionId];
+      this.positionsBeingLiquidated.delete(position.positionId);
     }
+
+    // remove from
   }
 
   applyPositionUpdates(positionUpdates: POSITION_UPDATES) {
