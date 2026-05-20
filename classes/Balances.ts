@@ -23,7 +23,7 @@ export default class BalanceManager {
 
   getBalance = (userId: string, symbol: CURRENCY_SYMBOL | undefined) => {
     if (symbol) return this.perSymbolBalances[userId]?.[symbol] || 0;
-    return this.perSymbolBalances[userId];
+    return this.perSymbolBalances[userId] || {};
   };
 
   addBalance = (userId: string, symbol: CURRENCY_SYMBOL, balance: number) => {

@@ -82,31 +82,43 @@ class EngineServer {
     );
 
     console.log(xreadGroupResponse);
-    xreadGroupResponse?.forEach((perStreamRespone) => {
-      if (perStreamRespone.name == process.env.REDIS_ENGINE_STREAM) {
-        let messages = perStreamRespone.messages;
-        messages.forEach(({ id, message }) => {
-          try {
-            let request: ENGINE_REQUEST = JSON.parse(message.data!);
+    if (xreadGroupResponse) {
+      for (let perStreamRespone of xreadGroupResponse) {
+        if (perStreamRespone.name == process.env.REDIS_ENGINE_STREAM) {
+          for (let { id, message } of perStreamRespone.messages) {
+            try {
+              let request: ENGINE_REQUEST = JSON.parse(message.data!);
 
-            // later TODO : add zod here maybe, to check this
-            // let { requestId, stream, type, payload } = request;
+              // later TODO : add zod here maybe, to check this
+              // let { requestId, stream, type, payload } = request;
 
-            // here sned to request handler
-            let result = this.handleEngineRequest(request);
+              // here sned to request handler
+              let result = this.handleEngineRequest(request);
 
-            // send back this result
+              // send back this result
+              await redisClient.xAdd(request.stream, "*", {
+                data: JSON.stringify({
+                  requestId: request.requestId,
+                  type: result.type,
+                  payload: result.payload,
+                }),
+              });
+            } catch (error) {
+              console.log(
+                "error happened in parsin request, so ignoring requset handling ",
+                message.data,
+              );
+            }
 
-            console.log(id, request);
-          } catch (error) {
-            console.log(
-              "error happened in parsin request, so ignoring requset handling ",
-              message.data,
+            await redisClient.xAck(
+              process.env.REDIS_ENGINE_STREAM!,
+              process.env.REDIS_ENGINE_GROUP!,
+              id,
             );
           }
-        });
+        }
       }
-    });
+    }
 
     // then wait again
     this.handleClientRequsts(redisClient);
