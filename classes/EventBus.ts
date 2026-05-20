@@ -2,6 +2,7 @@ import { HashMap } from "js-sdsl";
 import type { ENGINE_EVENT, ENGINE_EVENT_TYPE } from "../types/events/event.js";
 
 type EVENT_CALLBACK_FUNCTION = (event: ENGINE_EVENT) => void;
+
 class EventBus {
   private eventCallbacks = new HashMap<string, EVENT_CALLBACK_FUNCTION[]>();
 

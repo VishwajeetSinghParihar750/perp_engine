@@ -3,6 +3,7 @@ import { createClient, type RedisClientType } from "redis";
 import EventBus from "./EventBus.js";
 import MatchingEngine from "./Exchange.js";
 import type { ENGINE_EVENT, ENGINE_EVENT_TYPE } from "../types/events/event.js";
+import EventPublisher from "./EventPublisher.js";
 
 type ENGINE_REQUEST_TYPE =
   | "create_order"
@@ -12,11 +13,15 @@ type ENGINE_REQUEST_TYPE =
   | "get_depth"
   | "get_orders"
   | "get_order"
+  | "subscribe_event"
+  | "unsubscribe_event"
   | "get_fills";
 
 type ENGINE_RESPONSE_TYPE =
   | "order_created"
   | "order_cancelled"
+  | "event_subscribed"
+  | "event_unsubscribed"
   | "balance"
   | "balance_updated"
   | "depth"
@@ -41,33 +46,7 @@ class EngineServer {
   private redisClient: RedisClientType;
   private matchingEngine: MatchingEngine;
   private eventBus: EventBus;
-
-  subscriptions: Map<ENGINE_EVENT_TYPE, Set<string>> = new Map(); // string represents stream name that is subscribed to that event
-
-  private subscribeEvent(event: ENGINE_EVENT_TYPE, stream: string) {
-    // later TOOD: ideally should limit what outsiders can sub to
-    let subs = this.subscriptions.getOrInsert(event, new Set());
-    subs.add(stream);
-    this.subscriptions.set(event, subs);
-  }
-  private unsubscribeEvent(event: ENGINE_EVENT_TYPE, stream: string) {
-    // later TOOD: ideally should limit what outsiders can sub to
-    this.subscriptions?.get(event)?.delete(stream);
-  }
-
-  async handleEngineEvent(event: ENGINE_EVENT) {
-    // TODO: push to db puller
-
-    // send to all backends who are subbed
-    let subs = this.subscriptions.get(event.type);
-    if (subs)
-      for (let sub of subs) {
-        // push to redis stream this event
-        await this.redisClient.xAdd(sub, "*", {
-          data: JSON.stringify(event.data),
-        });
-      }
-  }
+  private eventPublisher: EventPublisher;
 
   async handleClientRequsts(redisClient: RedisClientType) {
     // getting connected client
@@ -154,12 +133,53 @@ class EngineServer {
     this.handleClientRequsts(dupClient);
   }
 
+  async initialize() {
+    await this.setupRedis();
+    this.eventPublisher.initialize();
+  }
   constructor() {
     this.eventBus = new EventBus();
     this.redisClient = createClient({ url: process.env.REDIS_URL! });
     this.matchingEngine = new MatchingEngine(this.eventBus);
-    this.setupRedis();
+    this.eventPublisher = new EventPublisher(
+      this.eventBus,
+      this.redisClient.duplicate(),
+    );
   }
+
+  private handleSubscribeEventRequest = (
+    engineRequest: ENGINE_REQUEST,
+  ): ENGINE_RESPONSE => {
+    try {
+      const { event, stream }: { event: ENGINE_EVENT_TYPE; stream: string } =
+        engineRequest.payload;
+      this.eventPublisher.subscribeEvent(event, stream);
+      return {
+        requestId: engineRequest.requestId,
+        type: "event_subscribed",
+        payload: null,
+      };
+    } catch (error) {
+      return { requestId: engineRequest.requestId, type: "error" };
+    }
+  };
+
+  private handleUnsubscribeEventRequest = (
+    engineRequest: ENGINE_REQUEST,
+  ): ENGINE_RESPONSE => {
+    try {
+      const { event, stream }: { event: ENGINE_EVENT_TYPE; stream: string } =
+        engineRequest.payload;
+      this.eventPublisher.unsubscribeEvent(event, stream);
+      return {
+        requestId: engineRequest.requestId,
+        type: "event_unsubscribed",
+        payload: null,
+      };
+    } catch (error) {
+      return { requestId: engineRequest.requestId, type: "error" };
+    }
+  };
 
   private handleGetDepthRequest = (
     engineRequest: ENGINE_REQUEST,
@@ -329,6 +349,12 @@ class EngineServer {
         break;
       case "get_orders":
         response = this.handleGetOrdersRequest(engineRequest);
+        break;
+      case "subscribe_event":
+        response = this.handleSubscribeEventRequest(engineRequest);
+        break;
+      case "unsubscribe_event":
+        response = this.handleUnsubscribeEventRequest(engineRequest);
         break;
 
       default:
