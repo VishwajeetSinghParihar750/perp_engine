@@ -1,6 +1,8 @@
+import "dotenv/config";
 import { createClient, type RedisClientType } from "redis";
 import EventBus from "./EventBus.js";
 import MatchingEngine from "./Exchange.js";
+import type { ENGINE_EVENT, ENGINE_EVENT_TYPE } from "../types/events/event.js";
 
 type ENGINE_REQUEST_TYPE =
   | "create_order"
@@ -24,6 +26,7 @@ type ENGINE_RESPONSE_TYPE =
   | "error"; // for anything that did not succeed
 
 type ENGINE_REQUEST = {
+  stream: string;
   requestId: string;
   type: ENGINE_REQUEST_TYPE;
   payload?: any;
@@ -39,37 +42,104 @@ class EngineServer {
   private matchingEngine: MatchingEngine;
   private eventBus: EventBus;
 
+  subscriptions: Map<ENGINE_EVENT_TYPE, Set<string>> = new Map(); // string represents stream name that is subscribed to that event
+
+  private subscribeEvent(event: ENGINE_EVENT_TYPE, stream: string) {
+    // later TOOD: ideally should limit what outsiders can sub to
+    let subs = this.subscriptions.getOrInsert(event, new Set());
+    subs.add(stream);
+    this.subscriptions.set(event, subs);
+  }
+  private unsubscribeEvent(event: ENGINE_EVENT_TYPE, stream: string) {
+    // later TOOD: ideally should limit what outsiders can sub to
+    this.subscriptions?.get(event)?.delete(stream);
+  }
+
+  async handleEngineEvent(event: ENGINE_EVENT) {
+    // TODO: push to db puller
+
+    // send to all backends who are subbed
+    let subs = this.subscriptions.get(event.type);
+    if (subs)
+      for (let sub of subs) {
+        // push to redis stream this event
+        await this.redisClient.xAdd(sub, "*", {
+          data: JSON.stringify(event.data),
+        });
+      }
+  }
+
+  async handleClientRequsts(redisClient: RedisClientType) {
+    // getting connected client
+
+    console.log("waiting for respones from redis stream");
+
+    const xreadGroupResponse = await redisClient.xReadGroup(
+      process.env.REDIS_ENGINE_GROUP!,
+      "consumer1",
+      [{ id: ">", key: process.env.REDIS_ENGINE_STREAM! }],
+      { BLOCK: 0, COUNT: 100 },
+    );
+
+    console.log(xreadGroupResponse);
+    xreadGroupResponse?.forEach((perStreamRespone) => {
+      if (perStreamRespone.name == process.env.REDIS_ENGINE_STREAM) {
+        let messages = perStreamRespone.messages;
+        messages.forEach(({ id, message }) => {
+          try {
+            let request: ENGINE_REQUEST = JSON.parse(message.data!);
+
+            // later TODO : add zod here maybe, to check this
+            // let { requestId, stream, type, payload } = request;
+
+            // here sned to request handler
+            let result = this.handleEngineRequest(request);
+
+            // send back this result
+
+            console.log(id, request);
+          } catch (error) {
+            console.log(
+              "error happened in parsin request, so ignoring requset handling ",
+              message.data,
+            );
+          }
+        });
+      }
+    });
+
+    // then wait again
+    this.handleClientRequsts(redisClient);
+  }
+
   async setupRedis() {
+    let dupClient = this.redisClient.duplicate();
+
     this.redisClient.on("error", (err) => {
+      console.log("redis error : ", err);
+    });
+    dupClient.on("error", (err) => {
       console.log("redis error : ", err);
     });
 
     await this.redisClient.connect();
+    await dupClient.connect();
 
-    // setupEventHandler for redis stream
-    this.eventBus.on("ALL_EVENTS", async (event) => {
-      let xAddResponse = await this.redisClient.xAdd(event.type, "*", {
-        data: JSON.stringify(event.data),
-      });
-      // maybe do error handling
-    });
-
-    let duplicateRedisClient = this.redisClient.duplicate();
-    // duplicated coz this will wait forever for the redis list,
-    // so it would interrput with redis straim handling
-
-    await duplicateRedisClient.connect();
-
-    console.log("REDIS SETUP DONE");
-    while (true) {
-      const engineRequest = await duplicateRedisClient.blPop(
-        "engine_request",
-        0,
+    // create stream consumer group
+    try {
+      await this.redisClient.xGroupCreate(
+        process.env.REDIS_ENGINE_STREAM!,
+        process.env.REDIS_ENGINE_GROUP!,
+        "0",
+        { MKSTREAM: true },
       );
-      console.log("RECEIVED ENGINE REQUEST : ", engineRequest);
-      if (engineRequest)
-        this.handleEngineRequest(JSON.parse(engineRequest.element));
+    } catch (error: any) {
+      if (!(error.message as string).includes("BUSYGROUP")) {
+        throw error;
+      }
     }
+
+    this.handleClientRequsts(dupClient);
   }
 
   constructor() {
@@ -220,7 +290,7 @@ class EngineServer {
     }
   };
 
-  handleEngineRequest = (engineRequest: ENGINE_REQUEST) => {
+  private handleEngineRequest = (engineRequest: ENGINE_REQUEST) => {
     let response;
     switch (engineRequest.type) {
       case "add_balance":
@@ -250,15 +320,10 @@ class EngineServer {
         break;
 
       default:
-        break;
+        throw new Error("invalid engine request type ");
     }
 
-    // TODO : this should also be kept separately not here ,emit event maybe let redis catch it and send it
-    // TODO  : make this push per backend queue, not per request
-    this.redisClient.rPush(
-      `engine_response_${engineRequest.requestId}`,
-      JSON.stringify(response),
-    );
+    return response;
   };
 }
 

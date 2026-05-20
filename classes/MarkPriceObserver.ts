@@ -39,9 +39,9 @@ class MarkPriceObserver {
 
     ws.onopen = (ev) => {
       // send sub request
-      console.log("binance ws server connection oopned ", ev);
+      // console.log("binance ws server connection oopned ", ev);
       let subRequest = JSON.stringify(this.BINANCE_SUBSCIRPTION_REQUEST);
-      console.log(subRequest);
+      // console.log(subRequest);
       ws.send(subRequest);
     };
 

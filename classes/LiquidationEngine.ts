@@ -134,7 +134,7 @@ class LiquidationEngine {
       const { E, i, p }: { E: number; i: CURRENCY_SYMBOL; p: string } = data;
       // E is time thing, price is in string
 
-      console.log(data);
+      // console.log(data);
 
       if (!this.indexPrices[i]) this.indexPrices[i] = +p;
       else {
