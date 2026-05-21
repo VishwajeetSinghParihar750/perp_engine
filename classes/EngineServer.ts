@@ -123,39 +123,11 @@ class EngineServer {
     this.handleClientRequsts(redisClient, lastRedisMessageId);
   }
 
-  async setupRedis() {
-    this.redisClient.on("error", (err) => {
-      console.log("redis error : ", err);
-    });
-
-    await this.redisClient.connect();
-
-    // create stream consumer group
-    try {
-      await this.redisClient.xGroupCreate(
-        process.env.REDIS_ENGINE_STREAM!,
-        process.env.REDIS_ENGINE_GROUP!,
-        "0",
-        { MKSTREAM: true },
-      );
-    } catch (error: any) {
-      if (!(error.message as string).includes("BUSYGROUP")) {
-        throw error;
-      }
-    }
-
-    // get from where to replay from snapshot
-  }
-
   async initialize() {
-    await this.setupRedis();
+    let lastRedisMessageId = this.snapshotManager.initialize(this.exchange);
 
-    this.eventPublisher.initialize();
-    this.markpPriceObserver.initialize();
-
-    let lastRedisMessageId = await this.snapshotManager.initialize(
-      this.exchange,
-    );
+    await this.eventPublisher.initialize();
+    await this.markpPriceObserver.initialize();
 
     let dupClient = this.redisClient.duplicate();
     await dupClient.connect();

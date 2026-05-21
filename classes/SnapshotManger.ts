@@ -1,6 +1,7 @@
 import { writeFile } from "fs/promises";
 import { readFileSync, readdirSync } from "fs";
-import path from "path";
+import path, { parse } from "path";
+import { string } from "zod";
 
 interface Snapshotable<T> {
   getSnapshot(): T;
@@ -11,12 +12,9 @@ class SnapshotManager {
   lastRedisStreamMessageId: string = "0";
 
   // return redis messge id at the time of snpahsot
-  async initialize(snapshotableClass: Snapshotable<any>): Promise<string> {
-    //
-
+  initialize(snapshotableClass: Snapshotable<any>): string {
     let toReturn = this.loadSnapshot(snapshotableClass);
     this.setupSavingSnapshot(snapshotableClass);
-
     return toReturn;
   }
 
@@ -63,9 +61,20 @@ class SnapshotManager {
       }, "0");
 
       // get messgae id from file name
+      lastRedisMessageId = fileName;
+      lastRedisMessageId.replace(".json", "");
 
       // load snapshot from this file
+      let fileData = readFileSync(
+        path.join(process.cwd(), `data/snapshots/${fileName}`),
+        "utf-8",
+      );
+      let parsedSnapshotData = JSON.parse(fileData);
+
+      // maybe throw when unable to load snapshot so, we can replay from 0 in event stream
+      snapshotableClass.loadSnapshot(parsedSnapshotData);
     }
+
     return lastRedisMessageId;
   }
 }
