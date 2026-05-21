@@ -1,7 +1,14 @@
-import type { CURRENCY_SYMBOL } from "../types/order.js";
+import { string } from "zod";
+import { CURRENCY_SYMBOL_ARRAY, type CURRENCY_SYMBOL } from "../types/order.js";
 import { InsufficientBalanceError } from "./Errors/Balances.js";
+import type { Snapshotable } from "./SnapshotManger.js";
 
-export default class BalanceManager {
+type BALANCE_SNAPSHOT = {
+  exchangeBalance: number;
+  perSymbolBalances: Record<string, Partial<Record<CURRENCY_SYMBOL, number>>>;
+  lockedAccounts: Partial<Record<CURRENCY_SYMBOL, string[]>>;
+};
+export default class BalanceManager implements Snapshotable<BALANCE_SNAPSHOT> {
   private perSymbolBalances: Record<
     string,
     Partial<Record<CURRENCY_SYMBOL, number>>
@@ -9,6 +16,30 @@ export default class BalanceManager {
   private exchangeBalance = 100000000;
 
   private lockedAccounts: Partial<Record<CURRENCY_SYMBOL, Set<string>>> = {};
+
+  getSnapshot(): BALANCE_SNAPSHOT {
+    return {
+      exchangeBalance: this.exchangeBalance,
+      perSymbolBalances: this.perSymbolBalances,
+      lockedAccounts: Object.keys(this.lockedAccounts).reduce((obj, curKey) => {
+        obj[curKey] = [...this.lockedAccounts[curKey as CURRENCY_SYMBOL]!];
+        return obj;
+      }, {} as any),
+    };
+  }
+  loadSnapshot(data: BALANCE_SNAPSHOT) {
+    this.exchangeBalance = data.exchangeBalance;
+    this.perSymbolBalances = data.perSymbolBalances;
+    this.lockedAccounts = Object.keys(data.lockedAccounts).reduce(
+      (obj, curKey) => {
+        obj[curKey as CURRENCY_SYMBOL] = new Set(
+          ...data.lockedAccounts[curKey as CURRENCY_SYMBOL]!,
+        );
+        return obj;
+      },
+      {} as Partial<Record<CURRENCY_SYMBOL, Set<string>>>,
+    );
+  }
 
   lockAccount(userId: string, symbol: CURRENCY_SYMBOL) {
     if (!this.lockedAccounts[symbol]) this.lockedAccounts[symbol] = new Set();
@@ -57,3 +88,5 @@ export default class BalanceManager {
     this.perSymbolBalances[userId]![symbol]! -= balance;
   };
 }
+
+export type { BALANCE_SNAPSHOT };

@@ -1,5 +1,8 @@
-import OrderBook, { type FILLS_INFO } from "./OrderBook.js";
-import Balances from "./Balances.js";
+import OrderBook, {
+  type FILLS_INFO,
+  type ORDERBOOK_SNAPSHOT,
+} from "./OrderBook.js";
+import Balances, { type BALANCE_SNAPSHOT } from "./Balances.js";
 import type {
   CURRENCY_SYMBOL,
   MARGIN_TYPE,
@@ -8,13 +11,19 @@ import type {
   TYPE,
 } from "../types/order.js";
 import EventBus from "./EventBus.js";
-import PositionManager from "./PositionManager.js";
+import PositionManager, { type POSITION_SNAPSHOT } from "./PositionManager.js";
 import LiquidationEngine, {
+  type LIQUIDATION_SNAPSHOT,
   type LiquidationOrderInfo,
 } from "./LiquidationEngine.js";
 import type { Snapshotable } from "./SnapshotManger.js";
 
-type EXCHANGE_SNAPSHOT = {};
+type EXCHANGE_SNAPSHOT = {
+  balance: BALANCE_SNAPSHOT;
+  orderbook: ORDERBOOK_SNAPSHOT;
+  position: POSITION_SNAPSHOT;
+  liquidation: LIQUIDATION_SNAPSHOT;
+};
 
 export default class Exchange implements Snapshotable<EXCHANGE_SNAPSHOT> {
   private balances: Balances;
@@ -23,9 +32,19 @@ export default class Exchange implements Snapshotable<EXCHANGE_SNAPSHOT> {
   private liquidationEngine: LiquidationEngine;
 
   getSnapshot() {
-    return {};
+    return {
+      balance: this.balances.getSnapshot(),
+      orderbook: this.orderBook.getSnapshot(),
+      position: this.positionManager.getSnapshot(),
+      liquidation: this.liquidationEngine.getSnapshot(),
+    };
   }
-  loadSnapshot(data: EXCHANGE_SNAPSHOT) {}
+  loadSnapshot(data: EXCHANGE_SNAPSHOT) {
+    this.balances.loadSnapshot(data.balance);
+    this.orderBook.loadSnapshot(data.orderbook);
+    this.positionManager.loadSnapshot(data.position);
+    this.liquidationEngine.loadSnapshot(data.liquidation);
+  }
 
   //actually balance locking is not needed in this coz order would go through, in multi threaded it wuold be needed
   private handleLiquidation = (order: LiquidationOrderInfo) => {

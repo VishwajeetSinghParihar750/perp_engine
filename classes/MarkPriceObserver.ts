@@ -63,13 +63,13 @@ class MarkPriceObserver {
       assert(!data.error && data.id == 1);
 
       ws.onmessage = async ({ data }) => {
-        // console.log("binance ws server connection sent message  ", data);
+        console.log("binance ws server connection sent message  ", data);
 
         data = JSON.parse(data);
         // this needs to be pushed on redis input stream
         // to keep input to engien determinstic
         await this.redisClient.xAdd(process.env.REDIS_ENGINE_STREAM!, "*", {
-          data: JSON.stringify({ type: "markprice_updated", data }),
+          data: JSON.stringify({ type: "markprice_updated", payload: data }),
         });
       };
     };

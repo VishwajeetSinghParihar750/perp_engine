@@ -13,6 +13,9 @@ import {
 import { assert } from "node:console";
 import type { ENGINE_EVENT } from "../types/events/event.js";
 import type EventBus from "./EventBus.js";
+import type { Snapshotable } from "./SnapshotManger.js";
+
+type ORDERBOOK_SNAPSHOT = {};
 
 type PRICE_LEVEL = { totalQuantity: number; orders: LinkList<ORDER> };
 
@@ -57,7 +60,7 @@ type ORDERBOOK = Partial<
 
 // INFO : cross margin has dynamic liquidation price, that we dont have to do right now, just do isolated right now
 
-export default class OrderBook {
+export default class OrderBook implements Snapshotable<ORDERBOOK_SNAPSHOT> {
   orderBook: ORDERBOOK = {};
   orders: Record<ORDER_ID, ORDER> = {}; // here keep ref of item in orderbook, to not double memeory
 
@@ -476,6 +479,11 @@ export default class OrderBook {
     });
   }
 
+  getSnapshot() {
+    return {};
+  }
+  loadSnapshot(data: ORDERBOOK_SNAPSHOT) {}
+
   createOrder = (
     type: TYPE,
     side: SIDE,
@@ -645,3 +653,5 @@ export default class OrderBook {
     return toReturn;
   };
 }
+
+export type { ORDERBOOK_SNAPSHOT };

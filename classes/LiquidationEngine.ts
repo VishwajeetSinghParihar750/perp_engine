@@ -10,6 +10,9 @@ import { type CURRENCY_SYMBOL, type POSITION_TYPE } from "../types/order.js";
 import type { POSITION_UPDATES } from "../types/positions.js";
 import EventBus from "./EventBus.js";
 import { assert } from "node:console";
+import type { Snapshotable } from "./SnapshotManger.js";
+
+type LIQUIDATION_SNAPSHOT = {};
 
 type LiquidationOrderInfo = {
   type: TYPE;
@@ -18,7 +21,7 @@ type LiquidationOrderInfo = {
   qty: number;
   userId: string;
 };
-class LiquidationEngine {
+class LiquidationEngine implements Snapshotable<LIQUIDATION_SNAPSHOT> {
   private readonly LIQUIDATION_LEVEL = 0.95; // at 5% margin left , liquidate
 
   private liquidPositions: Partial<
@@ -66,6 +69,10 @@ class LiquidationEngine {
     this.requestLiquidation = requestLiquidation;
     this.eventBus = eventBus;
   }
+  getSnapshot() {
+    return {};
+  }
+  loadSnapshot(data: LIQUIDATION_SNAPSHOT) {}
 
   private liquidatePosition(positionId: string) {
     let position = this.positions[positionId]!;
@@ -120,6 +127,7 @@ class LiquidationEngine {
     // maybe TODO :  get initial prices first through http, then update prices with ws later,  wait for getting requests until your prices are  set up
     // E is time thing, price is in string
 
+    console.log(symbol, newPrice);
     if (!this.indexPrices[symbol]) this.indexPrices[symbol] = newPrice;
     else {
       // handle liquidation based on chagne
@@ -242,4 +250,4 @@ class LiquidationEngine {
   }
 }
 export default LiquidationEngine;
-export type { LiquidationOrderInfo };
+export type { LiquidationOrderInfo, LIQUIDATION_SNAPSHOT };

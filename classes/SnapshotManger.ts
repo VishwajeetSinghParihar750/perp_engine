@@ -1,7 +1,6 @@
 import { writeFile } from "fs/promises";
 import { readFileSync, readdirSync } from "fs";
-import path, { parse } from "path";
-import { string } from "zod";
+import path from "path";
 
 interface Snapshotable<T> {
   getSnapshot(): T;
@@ -19,31 +18,31 @@ class SnapshotManager {
   }
 
   private setupSavingSnapshot(snapshotableClass: Snapshotable<any>) {
-    setInterval(
-      async () => {
-        // make snapshot
-        let snapshotObject = snapshotableClass.getSnapshot();
-        let toSaveSnapshot = JSON.stringify(snapshotObject);
+    setInterval(async () => {
+      console.log("saving engine snapshot ");
+      // make snapshot
+      let snapshotObject = snapshotableClass.getSnapshot();
+      let toSaveSnapshot = JSON.stringify(snapshotObject);
 
-        try {
-          await writeFile(
-            path.join(
-              process.cwd(),
-              `data/snapshots/${this.lastRedisStreamMessageId}`,
-            ),
-            toSaveSnapshot,
-          );
-        } catch (error) {
-          console.log(
-            "saving snapshot to disk failed at redis message position ",
-            this.lastRedisStreamMessageId,
-          );
-        }
+      console.log("saving engine snapshot ", toSaveSnapshot);
 
-        // save this to disk
-      },
-      5 * 60 * 1000,
-    ); // every 5 mins
+      try {
+        await writeFile(
+          path.join(
+            process.cwd(),
+            `data/snapshots/${this.lastRedisStreamMessageId}.json`,
+          ),
+          toSaveSnapshot,
+        );
+      } catch (error) {
+        console.log(
+          "saving snapshot to disk failed at redis message position ",
+          this.lastRedisStreamMessageId,
+        );
+      }
+
+      // save this to disk
+    }, 10 * 1000); // every 5 mins
   }
   private loadSnapshot(snapshotableClass: Snapshotable<any>): string {
     // get max number redis messgae id snapshot
@@ -53,26 +52,35 @@ class SnapshotManager {
     let files = readdirSync(path.join(process.cwd(), "/data/snapshots"));
 
     if (files.length > 0) {
-      let fileName = files.reduce((res, curVal) => {
-        if (res < curVal) {
-          res = curVal;
-        }
-        return res;
-      }, "0");
+      try {
+        let fileName = files.reduce((res, curVal) => {
+          if (res < curVal) {
+            res = curVal;
+          }
+          return res;
+        }, "0");
 
-      // get messgae id from file name
-      lastRedisMessageId = fileName;
-      lastRedisMessageId.replace(".json", "");
+        console.log(fileName);
+        // get messgae id from file name
+        lastRedisMessageId = fileName;
+        lastRedisMessageId.replace(".json", "");
 
-      // load snapshot from this file
-      let fileData = readFileSync(
-        path.join(process.cwd(), `data/snapshots/${fileName}`),
-        "utf-8",
-      );
-      let parsedSnapshotData = JSON.parse(fileData);
+        // load snapshot from this file
+        let fileData = readFileSync(
+          path.join(process.cwd(), `data/snapshots/${fileName}`),
+          "utf-8",
+        );
+        console.log(fileData);
+        let parsedSnapshotData = JSON.parse(fileData);
+        console.log(parsedSnapshotData);
 
-      // maybe throw when unable to load snapshot so, we can replay from 0 in event stream
-      snapshotableClass.loadSnapshot(parsedSnapshotData);
+        // maybe throw when unable to load snapshot so, we can replay from 0 in event stream
+        // TODO : if this fails we should restart the engine server,, coz some might have got the state loaded ,and others failed
+        snapshotableClass.loadSnapshot(parsedSnapshotData);
+      } catch (error) {
+        // start from 0
+        lastRedisMessageId = "0";
+      }
     }
 
     return lastRedisMessageId;

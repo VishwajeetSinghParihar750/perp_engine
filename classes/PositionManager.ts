@@ -1,6 +1,7 @@
 import type { CURRENCY_SYMBOL, MARGIN_TYPE } from "../types/order.js";
 import type { POSITION, POSITION_UPDATES } from "../types/positions.js";
 import type { FILLS_INFO } from "./OrderBook.js";
+import type { Snapshotable } from "./SnapshotManger.js";
 
 type ORDER_UPDATES = Record<
   string, // userid
@@ -16,13 +17,19 @@ type ORDER_UPDATES = Record<
     }
   >
 >;
+type POSITION_SNAPSHOT = {};
 
-class PositionManager {
+class PositionManager implements Snapshotable<POSITION_SNAPSHOT> {
   // just isolated
   private isolatedPositions: Record<
     string, // userid
     Partial<Record<CURRENCY_SYMBOL, POSITION>>
   > = {}; // this is per user per symbol per price positions
+
+  getSnapshot() {
+    return {};
+  }
+  loadSnapshot(data: POSITION_SNAPSHOT) {}
 
   private calculateOrderUpdates(fills: FILLS_INFO) {
     // there can be position updates at diff price levels for a single user
@@ -199,3 +206,5 @@ class PositionManager {
 }
 
 export default PositionManager;
+
+export type { POSITION_SNAPSHOT };

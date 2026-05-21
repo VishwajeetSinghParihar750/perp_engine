@@ -64,8 +64,6 @@ class EngineServer {
   ) {
     // getting connected client
 
-    console.log("waiting for respones from redis stream");
-
     const xreadGroupResponse = await redisClient.xRead(
       [
         {
@@ -85,7 +83,6 @@ class EngineServer {
               let request: ENGINE_REQUEST | ENGINE_INFO_REQUEST = JSON.parse(
                 message.data!,
               );
-
               // here switch based on info types
               if (request.type == "markprice_updated") {
                 this.handleEngineInfoRequest(request);
@@ -325,8 +322,11 @@ class EngineServer {
     engineRequest: ENGINE_INFO_REQUEST,
   ) => {
     try {
+      let { i: symbol, p: newPrice } = engineRequest.payload;
+
+      newPrice = +newPrice;
       //
-      this.exchange.handleMarkPriceUpdate(engineRequest.payload!);
+      this.exchange.handleMarkPriceUpdate({ newPrice, symbol });
     } catch (error) {
       console.error("error in hanlding mark price update ", error);
     }
@@ -377,6 +377,7 @@ class EngineServer {
     switch (engineRequest.type) {
       case "markprice_updated":
         this.handleUpdateMarkPriceRequest(engineRequest);
+        break;
 
       default:
         throw new Error("invalid engine request type ");

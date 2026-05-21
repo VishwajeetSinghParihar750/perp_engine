@@ -1,12 +1,30 @@
 import type { RedisClientType } from "redis";
 import type { ENGINE_EVENT, ENGINE_EVENT_TYPE } from "../types/events/event.js";
 import type EventBus from "./EventBus.js";
+import type { Snapshotable } from "./SnapshotManger.js";
 
-class EventPublisher {
+type EVENT_SUBSCRIPTIONS_SNAPSHOT = {
+  subscriptions: Record<ENGINE_EVENT_TYPE, string[]>;
+};
+
+class EventPublisher implements Snapshotable<EVENT_SUBSCRIPTIONS_SNAPSHOT> {
   subscriptions: Map<ENGINE_EVENT_TYPE, Set<string>> = new Map(); // string represents stream name that is subscribed to that event
   redisClient: RedisClientType;
 
   eventBus: EventBus;
+
+  getSnapshot(): EVENT_SUBSCRIPTIONS_SNAPSHOT {
+    return {
+      subscriptions: this.subscriptions.keys().reduce((obj, curKey) => {
+        obj[curKey] = [...this.subscriptions.get(curKey)!];
+        return obj;
+      }, {} as any),
+    };
+  }
+  loadSnapshot(data: EVENT_SUBSCRIPTIONS_SNAPSHOT) {
+    this.subscriptions = new Map();
+    Object.keys(data.subscriptions).forEach((key) => {});
+  }
 
   handleEvent = async (event: ENGINE_EVENT) => {
     // send to all backends who are subbed
@@ -49,3 +67,5 @@ class EventPublisher {
 }
 
 export default EventPublisher;
+
+export type { EVENT_SUBSCRIPTIONS_SNAPSHOT };
