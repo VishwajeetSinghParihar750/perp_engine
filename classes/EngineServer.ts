@@ -1,9 +1,12 @@
 import "dotenv/config";
 import { createClient, type RedisClientType } from "redis";
 import EventBus from "./EventBus.js";
-import MatchingEngine from "./Exchange.js";
+import Exchange from "./Exchange.js";
 import type { ENGINE_EVENT, ENGINE_EVENT_TYPE } from "../types/events/event.js";
 import EventPublisher from "./EventPublisher.js";
+import MarkPriceObserver from "./MarkPriceObserver.js";
+
+type ENGINE_INFO_REQUEST_TYPE = "markprice_updated";
 
 type ENGINE_REQUEST_TYPE =
   | "create_order"
@@ -30,6 +33,10 @@ type ENGINE_RESPONSE_TYPE =
   | "fills"
   | "error"; // for anything that did not succeed
 
+type ENGINE_INFO_REQUEST = {
+  type: ENGINE_INFO_REQUEST_TYPE;
+  payload?: any;
+};
 type ENGINE_REQUEST = {
   stream: string;
   requestId: string;
@@ -44,9 +51,10 @@ type ENGINE_RESPONSE = {
 
 class EngineServer {
   private redisClient: RedisClientType;
-  private matchingEngine: MatchingEngine;
+  private exchange: Exchange;
   private eventBus: EventBus;
   private eventPublisher: EventPublisher;
+  private markpPriceObserver: MarkPriceObserver;
 
   async handleClientRequsts(redisClient: RedisClientType) {
     // getting connected client
@@ -66,22 +74,30 @@ class EngineServer {
         if (perStreamRespone.name == process.env.REDIS_ENGINE_STREAM) {
           for (let { id, message } of perStreamRespone.messages) {
             try {
-              let request: ENGINE_REQUEST = JSON.parse(message.data!);
+              let request: ENGINE_REQUEST | ENGINE_INFO_REQUEST = JSON.parse(
+                message.data!,
+              );
 
-              // later TODO : add zod here maybe, to check this
-              // let { requestId, stream, type, payload } = request;
+              // here switch based on info types
+              if (request.type == "markprice_updated") {
+                this.handleEngineInfoRequest(request);
+              } else {
+                // later TODO : add zod here maybe, to check this
+                // let { requestId, stream, type, payload } = request;
 
-              // here sned to request handler
-              let result = this.handleEngineRequest(request);
+                // here sned to request handler
+                let result = this.handleEngineRequest(request);
 
-              // send back this result
-              await redisClient.xAdd(request.stream, "*", {
-                data: JSON.stringify({
-                  requestId: request.requestId,
-                  type: result.type,
-                  payload: result.payload,
-                }),
-              });
+                if (result)
+                  // send back this result
+                  await redisClient.xAdd(request.stream, "*", {
+                    data: JSON.stringify({
+                      requestId: request.requestId,
+                      type: result.type,
+                      payload: result.payload,
+                    }),
+                  });
+              }
             } catch (error) {
               console.log(
                 "error happened in parsin request, so ignoring requset handling ",
@@ -136,13 +152,18 @@ class EngineServer {
   async initialize() {
     await this.setupRedis();
     this.eventPublisher.initialize();
+    this.markpPriceObserver.initialize();
   }
+
   constructor() {
     this.eventBus = new EventBus();
     this.redisClient = createClient({ url: process.env.REDIS_URL! });
-    this.matchingEngine = new MatchingEngine(this.eventBus);
+    this.exchange = new Exchange(this.eventBus);
     this.eventPublisher = new EventPublisher(
       this.eventBus,
+      this.redisClient.duplicate(),
+    );
+    this.markpPriceObserver = new MarkPriceObserver(
       this.redisClient.duplicate(),
     );
   }
@@ -185,7 +206,7 @@ class EngineServer {
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
     try {
-      let depth = this.matchingEngine.getDepth(engineRequest.payload.symbol);
+      let depth = this.exchange.getDepth(engineRequest.payload.symbol);
       return {
         requestId: engineRequest.requestId,
         type: "depth",
@@ -200,7 +221,7 @@ class EngineServer {
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
     try {
-      let orders = this.matchingEngine.getOrders(engineRequest.payload.symbol);
+      let orders = this.exchange.getOrders(engineRequest.payload.symbol);
       return {
         requestId: engineRequest.requestId,
         type: "orders",
@@ -215,7 +236,7 @@ class EngineServer {
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
     try {
-      let fills = this.matchingEngine.getFills();
+      let fills = this.exchange.getFills();
       return {
         requestId: engineRequest.requestId,
         type: "fills",
@@ -229,7 +250,7 @@ class EngineServer {
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
     try {
-      let order = this.matchingEngine.getOrder(engineRequest.payload.orderId);
+      let order = this.exchange.getOrder(engineRequest.payload.orderId);
       if (!order) throw new Error();
 
       return {
@@ -245,7 +266,7 @@ class EngineServer {
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
     try {
-      let balance = this.matchingEngine.getBalance(
+      let balance = this.exchange.getBalance(
         engineRequest.payload.userId,
         engineRequest.payload.symbol,
       );
@@ -263,9 +284,7 @@ class EngineServer {
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
     try {
-      let { status } = this.matchingEngine.cancelOrder(
-        engineRequest.payload.orderId,
-      );
+      let { status } = this.exchange.cancelOrder(engineRequest.payload.orderId);
       if (status != "CANCELLED") throw new Error();
 
       return { requestId: engineRequest.requestId, type: "order_cancelled" };
@@ -280,7 +299,7 @@ class EngineServer {
     try {
       let { type, side, price, qty, symbol, userId, margin, marginType } =
         engineRequest.payload;
-      let { status, orderId, fills } = this.matchingEngine.createOrder(
+      let { status, orderId, fills } = this.exchange.createOrder(
         type,
         side,
         symbol,
@@ -311,7 +330,7 @@ class EngineServer {
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
     try {
-      this.matchingEngine.addBalance(
+      this.exchange.addBalance(
         engineRequest.payload.userId,
         engineRequest.payload.amount,
         engineRequest.payload.symbol,
@@ -319,6 +338,17 @@ class EngineServer {
       return { requestId: engineRequest.requestId, type: "balance_updated" };
     } catch (error) {
       return { requestId: engineRequest.requestId, type: "error" };
+    }
+  };
+
+  private handleUpdateMarkPriceRequest = (
+    engineRequest: ENGINE_INFO_REQUEST,
+  ) => {
+    try {
+      //
+      this.exchange.handleMarkPriceUpdate(engineRequest.payload!);
+    } catch (error) {
+      console.error("error in hanlding mark price update ", error);
     }
   };
 
@@ -362,6 +392,15 @@ class EngineServer {
     }
 
     return response;
+  };
+  private handleEngineInfoRequest = (engineRequest: ENGINE_INFO_REQUEST) => {
+    switch (engineRequest.type) {
+      case "markprice_updated":
+        this.handleUpdateMarkPriceRequest(engineRequest);
+
+      default:
+        throw new Error("invalid engine request type ");
+    }
   };
 }
 

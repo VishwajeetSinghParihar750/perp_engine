@@ -44,7 +44,6 @@ export default class Exchange {
   };
 
   constructor(eventBus: EventBus) {
-    new MarkPriceObserver(eventBus);
     this.balances = new Balances();
     this.orderBook = new OrderBook(eventBus);
     this.positionManager = new PositionManager();
@@ -183,5 +182,14 @@ export default class Exchange {
   }
   getFills() {
     return this.orderBook.fills;
+  }
+  handleMarkPriceUpdate({
+    newPrice,
+    symbol,
+  }: {
+    newPrice: number;
+    symbol: CURRENCY_SYMBOL;
+  }) {
+    this.liquidationEngine.handleMarkPriceUpdate({ symbol, newPrice });
   }
 }

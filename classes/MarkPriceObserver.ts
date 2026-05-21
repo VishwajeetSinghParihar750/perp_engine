@@ -1,7 +1,6 @@
 import "dotenv/config";
-import type EventBus from "./EventBus.js";
-import { exit } from "node:process";
 import { assert } from "node:console";
+import type { RedisClientType } from "@redis/client";
 
 class MarkPriceObserver {
   private BINANCE_SUBSCIRPTION_REQUEST: {
@@ -13,17 +12,24 @@ class MarkPriceObserver {
     params: [],
     id: 1,
   };
+  private redisClient: RedisClientType;
 
   private readonly streamPairs: string[] = [
     "btcusd@indexPrice",
     "solusd@indexPrice",
     "ethusd@indexPrice",
   ];
-  private eventBus: EventBus;
+  // private eventBus: EventBus;
 
-  constructor(eventBus: EventBus) {
+  async initialize() {
+    await this.redisClient.connect();
+  }
+  constructor(redisClient: RedisClientType) {
+    this.redisClient = redisClient;
+
     this.setupPriceSubscriptions();
-    this.eventBus = eventBus;
+
+    // this.eventBus = eventBus;
   }
 
   setupPriceSubscriptions() {
@@ -56,14 +62,14 @@ class MarkPriceObserver {
 
       assert(!data.error && data.id == 1);
 
-      ws.onmessage = ({ data }) => {
+      ws.onmessage = async ({ data }) => {
         // console.log("binance ws server connection sent message  ", data);
 
         data = JSON.parse(data);
-
-        this.eventBus.emit({
-          type: "markprice.updates",
-          data,
+        // this needs to be pushed on redis input stream
+        // to keep input to engien determinstic
+        await this.redisClient.xAdd(process.env.REDIS_ENGINE_STREAM!, "*", {
+          data: JSON.stringify({ type: "markprice_updated", data }),
         });
       };
     };

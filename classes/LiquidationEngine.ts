@@ -65,7 +65,6 @@ class LiquidationEngine {
   ) {
     this.requestLiquidation = requestLiquidation;
     this.eventBus = eventBus;
-    this.handlePriceUpdates();
   }
 
   private liquidatePosition(positionId: string) {
@@ -97,22 +96,6 @@ class LiquidationEngine {
     // keep placing margin orders for this until fully filled
     this.keepTryingLiquidation(position.positionId);
   }
-  private handlePriceUpdate(symbol: CURRENCY_SYMBOL, newPrice: number) {
-    let prevPrice = this.indexPrices[symbol]!;
-
-    if (prevPrice == newPrice) return;
-
-    let positionsMap =
-      this.liquidPositions[symbol]?.[prevPrice < newPrice ? "SHORT" : "LONG"];
-
-    while (positionsMap && !positionsMap.empty()) {
-      let [price, positions] = positionsMap.front()!;
-      if (price > newPrice) return;
-
-      // liquidate all positions at this price
-      positions.forEach((position) => this.liquidatePosition(position));
-    }
-  }
 
   private getLiquidationForPosition(positon: POSITION): number {
     let canTakeLoss = positon.margin * this.LIQUIDATION_LEVEL;
@@ -127,21 +110,34 @@ class LiquidationEngine {
     return newPrice;
   }
 
-  private handlePriceUpdates() {
-    // TODO :  get initial prices first through http, then update prices with ws later,  wait for getting requests until your prices are  set up
+  handleMarkPriceUpdate({
+    symbol,
+    newPrice,
+  }: {
+    symbol: CURRENCY_SYMBOL;
+    newPrice: number;
+  }) {
+    // maybe TODO :  get initial prices first through http, then update prices with ws later,  wait for getting requests until your prices are  set up
+    // E is time thing, price is in string
 
-    this.eventBus.on("markprice.updates", ({ data, type }) => {
-      const { E, i, p }: { E: number; i: CURRENCY_SYMBOL; p: string } = data;
-      // E is time thing, price is in string
+    if (!this.indexPrices[symbol]) this.indexPrices[symbol] = newPrice;
+    else {
+      // handle liquidation based on chagne
+      let prevPrice = this.indexPrices[symbol]!;
 
-      // console.log(data);
+      if (prevPrice == newPrice) return;
 
-      if (!this.indexPrices[i]) this.indexPrices[i] = +p;
-      else {
-        // handle liquidation based on chagne
-        this.handlePriceUpdate(i, +p);
+      let positionsMap =
+        this.liquidPositions[symbol]?.[prevPrice < newPrice ? "SHORT" : "LONG"];
+
+      while (positionsMap && !positionsMap.empty()) {
+        let [price, positions] = positionsMap.front()!;
+        if (price > newPrice) return;
+
+        // liquidate all positions at this price
+        positions.forEach((position) => this.liquidatePosition(position));
       }
-    });
+    }
   }
 
   getMarginRequired(order: {
