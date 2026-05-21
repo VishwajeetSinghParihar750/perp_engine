@@ -12,7 +12,6 @@ import PositionManager from "./PositionManager.js";
 import LiquidationEngine, {
   type LiquidationOrderInfo,
 } from "./LiquidationEngine.js";
-import MarkPriceObserver from "./MarkPriceObserver.js";
 
 export default class Exchange {
   private balances: Balances;

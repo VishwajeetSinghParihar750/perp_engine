@@ -464,7 +464,7 @@ export default class OrderBook {
     };
   };
 
-  emitEvent(event: ENGINE_EVENT) {
+  private emitEvent(event: ENGINE_EVENT) {
     this.eventBus.emit(event);
   }
 

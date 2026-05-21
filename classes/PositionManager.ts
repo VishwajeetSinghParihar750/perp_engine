@@ -1,9 +1,4 @@
-import { OrderedMap } from "js-sdsl";
-import type {
-  CURRENCY_SYMBOL,
-  MARGIN_TYPE,
-  POSITION_TYPE,
-} from "../types/order.js";
+import type { CURRENCY_SYMBOL, MARGIN_TYPE } from "../types/order.js";
 import type { POSITION, POSITION_UPDATES } from "../types/positions.js";
 import type { FILLS_INFO } from "./OrderBook.js";
 
@@ -193,9 +188,6 @@ class PositionManager {
     }
     return { pnlUpdates: usersPnlUpdate, positionUpdates };
   }
-
-  // can keep this separate
-  private applyPositionUpdats(postionUpdates: POSITION_UPDATES) {}
 
   applyFills(fills: FILLS_INFO) {
     let orderUpdates = this.calculateOrderUpdates(fills);
