@@ -5,6 +5,7 @@ import Exchange from "./Exchange.js";
 import type { ENGINE_EVENT, ENGINE_EVENT_TYPE } from "../types/events/event.js";
 import EventPublisher from "./EventPublisher.js";
 import MarkPriceObserver from "./MarkPriceObserver.js";
+import SnapshotManager from "./SnapshotManger.js";
 
 type ENGINE_INFO_REQUEST_TYPE = "markprice_updated";
 
@@ -55,16 +56,23 @@ class EngineServer {
   private eventBus: EventBus;
   private eventPublisher: EventPublisher;
   private markpPriceObserver: MarkPriceObserver;
+  private snapshotManager: SnapshotManager;
 
-  async handleClientRequsts(redisClient: RedisClientType) {
+  async handleClientRequsts(
+    redisClient: RedisClientType,
+    lastRedisMessageId: string,
+  ) {
     // getting connected client
 
     console.log("waiting for respones from redis stream");
 
-    const xreadGroupResponse = await redisClient.xReadGroup(
-      process.env.REDIS_ENGINE_GROUP!,
-      "consumer1",
-      [{ id: ">", key: process.env.REDIS_ENGINE_STREAM! }],
+    const xreadGroupResponse = await redisClient.xRead(
+      [
+        {
+          id: lastRedisMessageId,
+          key: process.env.REDIS_ENGINE_STREAM!,
+        },
+      ],
       { BLOCK: 0, COUNT: 100 },
     );
 
@@ -105,32 +113,22 @@ class EngineServer {
               );
             }
 
-            await redisClient.xAck(
-              process.env.REDIS_ENGINE_STREAM!,
-              process.env.REDIS_ENGINE_GROUP!,
-              id,
-            );
+            lastRedisMessageId = id;
           }
         }
       }
     }
 
     // then wait again
-    this.handleClientRequsts(redisClient);
+    this.handleClientRequsts(redisClient, lastRedisMessageId);
   }
 
   async setupRedis() {
-    let dupClient = this.redisClient.duplicate();
-
     this.redisClient.on("error", (err) => {
-      console.log("redis error : ", err);
-    });
-    dupClient.on("error", (err) => {
       console.log("redis error : ", err);
     });
 
     await this.redisClient.connect();
-    await dupClient.connect();
 
     // create stream consumer group
     try {
@@ -146,17 +144,27 @@ class EngineServer {
       }
     }
 
-    this.handleClientRequsts(dupClient);
+    // get from where to replay from snapshot
   }
 
   async initialize() {
     await this.setupRedis();
+
     this.eventPublisher.initialize();
     this.markpPriceObserver.initialize();
+
+    let lastRedisMessageId = await this.snapshotManager.initialize(
+      this.exchange,
+    );
+
+    let dupClient = this.redisClient.duplicate();
+    await dupClient.connect();
+    this.handleClientRequsts(dupClient, lastRedisMessageId);
   }
 
   constructor() {
     this.eventBus = new EventBus();
+    this.snapshotManager = new SnapshotManager();
     this.redisClient = createClient({ url: process.env.REDIS_URL! });
     this.exchange = new Exchange(this.eventBus);
     this.eventPublisher = new EventPublisher(

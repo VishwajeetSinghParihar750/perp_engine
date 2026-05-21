@@ -12,12 +12,20 @@ import PositionManager from "./PositionManager.js";
 import LiquidationEngine, {
   type LiquidationOrderInfo,
 } from "./LiquidationEngine.js";
+import type { Snapshotable } from "./SnapshotManger.js";
 
-export default class Exchange {
+type EXCHANGE_SNAPSHOT = {};
+
+export default class Exchange implements Snapshotable<EXCHANGE_SNAPSHOT> {
   private balances: Balances;
   private orderBook: OrderBook;
   private positionManager: PositionManager;
   private liquidationEngine: LiquidationEngine;
+
+  getSnapshot() {
+    return {};
+  }
+  loadSnapshot(data: EXCHANGE_SNAPSHOT) {}
 
   //actually balance locking is not needed in this coz order would go through, in multi threaded it wuold be needed
   private handleLiquidation = (order: LiquidationOrderInfo) => {
