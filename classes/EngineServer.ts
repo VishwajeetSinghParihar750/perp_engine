@@ -17,6 +17,7 @@ type ENGINE_REQUEST_TYPE =
   | "get_depth"
   | "get_orders"
   | "get_order"
+  | "get_position"
   | "subscribe_event"
   | "unsubscribe_event";
 
@@ -28,6 +29,7 @@ type ENGINE_RESPONSE_TYPE =
   | "balance"
   | "balance_updated"
   | "depth"
+  | "position"
   | "orders"
   | "order"
   | "fills"
@@ -63,7 +65,7 @@ class EngineServer {
   ) {
     // getting connected client
 
-    const xreadGroupResponse = await redisClient.xRead(
+    const xReadResponse = await redisClient.xRead(
       [
         {
           id: lastRedisMessageId,
@@ -73,9 +75,9 @@ class EngineServer {
       { BLOCK: 0, COUNT: 100 },
     );
 
-    console.log(xreadGroupResponse);
-    if (xreadGroupResponse) {
-      for (let perStreamRespone of xreadGroupResponse) {
+    console.log(xReadResponse);
+    if (xReadResponse) {
+      for (let perStreamRespone of xReadResponse) {
         if (perStreamRespone.name == process.env.REDIS_ENGINE_STREAM) {
           for (let { id, message } of perStreamRespone.messages) {
             try {
@@ -115,6 +117,7 @@ class EngineServer {
       }
     }
 
+    this.snapshotManager.setLastRedisMessageId(lastRedisMessageId);
     // then wait again
     this.handleClientRequsts(redisClient, lastRedisMessageId);
   }
@@ -312,6 +315,19 @@ class EngineServer {
       newPrice = +newPrice;
       //
       this.exchange.handleMarkPriceUpdate({ newPrice, symbol });
+    } catch (error) {
+      console.error("error in hanlding mark price update ", error);
+    }
+  };
+
+  private getPositonRequest = (engineRequest: ENGINE_REQUEST) => {
+    try {
+      let { userId, symbol } = engineRequest.payload;
+
+      //
+      let payload = this.exchange.getPosition(userId, symbol);
+
+      return { requestId: engineRequest.requestId, type: "position", payload };
     } catch (error) {
       console.error("error in hanlding mark price update ", error);
     }

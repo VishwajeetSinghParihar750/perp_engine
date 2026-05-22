@@ -14,7 +14,6 @@ class SnapshotManager {
   initialize(snapshotableClass: Snapshotable<any>): string {
     let toReturn = this.loadSnapshot(snapshotableClass);
     this.setupSavingSnapshot(snapshotableClass);
-    console.log("toReturn", toReturn);
     return toReturn;
   }
 
@@ -26,7 +25,7 @@ class SnapshotManager {
 
       if (lastSnapshotSaved < this.lastRedisStreamMessageId) {
         let snapshotObject = snapshotableClass.getSnapshot();
-        let toSaveSnapshot = JSON.stringify(snapshotObject);
+        let toSaveSnapshot = JSON.stringify(snapshotObject, null, 2);
         console.log("saving engine snapshot ", toSaveSnapshot);
         try {
           await writeFile(
@@ -87,8 +86,14 @@ class SnapshotManager {
       }
     }
 
+    // console.log(JSON.stringify(snapshotableClass.getSnapshot(), null, 2));
+
     return lastRedisMessageId;
   }
+
+  setLastRedisMessageId = (id: string) => {
+    this.lastRedisStreamMessageId = id;
+  };
 }
 
 export default SnapshotManager;

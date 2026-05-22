@@ -37,6 +37,12 @@ class PositionManager implements Snapshotable<POSITION_SNAPSHOT> {
   loadSnapshot(data: POSITION_SNAPSHOT) {
     this.isolatedPositions = data.isolatedPositions;
   }
+  getPosition(userId: string, symbol?: CURRENCY_SYMBOL) {
+    if (symbol) {
+      return this.isolatedPositions[userId];
+    }
+    return this.isolatedPositions[userId]?.[symbol!];
+  }
 
   private calculateOrderUpdates(fills: FILLS_INFO) {
     // there can be position updates at diff price levels for a single user
