@@ -206,9 +206,6 @@ export default class Exchange implements Snapshotable<EXCHANGE_SNAPSHOT> {
   getOrders(symbol: CURRENCY_SYMBOL) {
     return this.orderBook.getOrders(symbol);
   }
-  getFills() {
-    return this.orderBook.fills;
-  }
   handleMarkPriceUpdate({
     newPrice,
     symbol,

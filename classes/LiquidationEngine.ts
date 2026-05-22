@@ -12,7 +12,12 @@ import EventBus from "./EventBus.js";
 import { assert } from "node:console";
 import type { Snapshotable } from "./SnapshotManger.js";
 
-type LIQUIDATION_SNAPSHOT = {};
+type LIQUIDATION_SNAPSHOT = {
+  positionsBeingLiquidated: string[];
+  indexPrices: Partial<Record<CURRENCY_SYMBOL, number>>;
+  positions: Record<string, POSITION>;
+  liquidationPrice: Record<string, number>;
+};
 
 type LiquidationOrderInfo = {
   type: TYPE;
@@ -38,8 +43,58 @@ class LiquidationEngine implements Snapshotable<LIQUIDATION_SNAPSHOT> {
   > = new Map();
   private indexPrices: Partial<Record<CURRENCY_SYMBOL, number>> = {};
 
-  private positions: Record<string, POSITION> = {}; // positions in liquidPosition are ref of this
+  private positions: Record<string, POSITION> = {}; // positions in positions being liqudated are ref of this
   private liquidationPrice: Record<string, number> = {}; // position id mapped to price
+
+  getSnapshot(): LIQUIDATION_SNAPSHOT {
+    return {
+      indexPrices: this.indexPrices,
+      liquidationPrice: this.liquidationPrice,
+      positions: this.positions,
+      positionsBeingLiquidated: this.positionsBeingLiquidated
+        .entries()
+        .reduce((obj, [_, symPosMap]) => {
+          symPosMap.values().forEach((position) => {
+            obj.push(position.positionId);
+          });
+          return obj;
+        }, [] as string[]),
+    };
+  }
+  loadSnapshot(data: LIQUIDATION_SNAPSHOT) {
+    this.indexPrices = data.indexPrices;
+    this.liquidationPrice = data.liquidationPrice;
+    this.positions = this.positions;
+
+    Object.values(this.positions).forEach((position) => {
+      // add to liquis positons
+      if (!this.liquidPositions[position.symbol]) {
+        this.liquidPositions[position.symbol] = {
+          LONG: new OrderedMap(),
+          SHORT: new OrderedMap(),
+        };
+      }
+      let curVal =
+        this.liquidPositions[position.symbol]![position.type].getElementByKey(
+          this.liquidationPrice[position.positionId]!,
+        ) || new Set<string>();
+
+      curVal.add(position.positionId);
+
+      this.liquidPositions[position.symbol]![position.type].setElement(
+        this.liquidationPrice[position.positionId]!,
+        curVal,
+      );
+
+      // add to poistions being lqiduaited
+      let byUserIdInit = this.positionsBeingLiquidated.getOrInsert(
+        position.userId,
+        new Map(),
+      );
+      byUserIdInit.set(position.symbol, position);
+      this.positionsBeingLiquidated.set(position.userId, byUserIdInit);
+    });
+  }
 
   private requestLiquidation: (order: LiquidationOrderInfo) => void;
 
@@ -69,10 +124,6 @@ class LiquidationEngine implements Snapshotable<LIQUIDATION_SNAPSHOT> {
     this.requestLiquidation = requestLiquidation;
     this.eventBus = eventBus;
   }
-  getSnapshot() {
-    return {};
-  }
-  loadSnapshot(data: LIQUIDATION_SNAPSHOT) {}
 
   private liquidatePosition(positionId: string) {
     let position = this.positions[positionId]!;

@@ -14,31 +14,37 @@ class SnapshotManager {
   initialize(snapshotableClass: Snapshotable<any>): string {
     let toReturn = this.loadSnapshot(snapshotableClass);
     this.setupSavingSnapshot(snapshotableClass);
+    console.log("toReturn", toReturn);
     return toReturn;
   }
 
   private setupSavingSnapshot(snapshotableClass: Snapshotable<any>) {
+    let lastSnapshotSaved: string = "";
+
     setInterval(async () => {
-      console.log("saving engine snapshot ");
       // make snapshot
-      let snapshotObject = snapshotableClass.getSnapshot();
-      let toSaveSnapshot = JSON.stringify(snapshotObject);
 
-      console.log("saving engine snapshot ", toSaveSnapshot);
-
-      try {
-        await writeFile(
-          path.join(
-            process.cwd(),
-            `data/snapshots/${this.lastRedisStreamMessageId}.json`,
-          ),
-          toSaveSnapshot,
-        );
-      } catch (error) {
-        console.log(
-          "saving snapshot to disk failed at redis message position ",
-          this.lastRedisStreamMessageId,
-        );
+      if (lastSnapshotSaved < this.lastRedisStreamMessageId) {
+        let snapshotObject = snapshotableClass.getSnapshot();
+        let toSaveSnapshot = JSON.stringify(snapshotObject);
+        console.log("saving engine snapshot ", toSaveSnapshot);
+        try {
+          await writeFile(
+            path.join(
+              process.cwd(),
+              `data/snapshots/${this.lastRedisStreamMessageId}.json`,
+            ),
+            toSaveSnapshot,
+          );
+          lastSnapshotSaved = this.lastRedisStreamMessageId;
+        } catch (error) {
+          console.log(
+            "saving snapshot to disk failed at redis message position ",
+            this.lastRedisStreamMessageId,
+          );
+        }
+      } else {
+        console.log("not saving snaphsot coz no new redis messages parsed");
       }
 
       // save this to disk
@@ -60,10 +66,8 @@ class SnapshotManager {
           return res;
         }, "0");
 
-        console.log(fileName);
         // get messgae id from file name
-        lastRedisMessageId = fileName;
-        lastRedisMessageId.replace(".json", "");
+        lastRedisMessageId = fileName.replace(".json", "");
 
         // load snapshot from this file
         let fileData = readFileSync(

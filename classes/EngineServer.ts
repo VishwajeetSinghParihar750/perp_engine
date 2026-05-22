@@ -18,8 +18,7 @@ type ENGINE_REQUEST_TYPE =
   | "get_orders"
   | "get_order"
   | "subscribe_event"
-  | "unsubscribe_event"
-  | "get_fills";
+  | "unsubscribe_event";
 
 type ENGINE_RESPONSE_TYPE =
   | "order_created"
@@ -209,20 +208,6 @@ class EngineServer {
     }
   };
 
-  private handleGetFillsRequest = (
-    engineRequest: ENGINE_REQUEST,
-  ): ENGINE_RESPONSE => {
-    try {
-      let fills = this.exchange.getFills();
-      return {
-        requestId: engineRequest.requestId,
-        type: "fills",
-        payload: fills,
-      };
-    } catch (error) {
-      return { requestId: engineRequest.requestId, type: "error" };
-    }
-  };
   private handleGetOrderRequest = (
     engineRequest: ENGINE_REQUEST,
   ): ENGINE_RESPONSE => {
@@ -350,9 +335,6 @@ class EngineServer {
         break;
       case "get_depth":
         response = this.handleGetDepthRequest(engineRequest);
-        break;
-      case "get_fills":
-        response = this.handleGetFillsRequest(engineRequest);
         break;
       case "get_order":
         response = this.handleGetOrderRequest(engineRequest);

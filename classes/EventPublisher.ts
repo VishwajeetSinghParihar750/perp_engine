@@ -21,9 +21,12 @@ class EventPublisher implements Snapshotable<EVENT_SUBSCRIPTIONS_SNAPSHOT> {
       }, {} as any),
     };
   }
+
   loadSnapshot(data: EVENT_SUBSCRIPTIONS_SNAPSHOT) {
     this.subscriptions = new Map();
-    Object.keys(data.subscriptions).forEach((key) => {});
+    Object.entries(data.subscriptions).forEach(([key, sub]) => {
+      this.subscriptions.set(key as ENGINE_EVENT_TYPE, new Set(sub));
+    });
   }
 
   handleEvent = async (event: ENGINE_EVENT) => {

@@ -15,8 +15,6 @@ import type { ENGINE_EVENT } from "../types/events/event.js";
 import type EventBus from "./EventBus.js";
 import type { Snapshotable } from "./SnapshotManger.js";
 
-type ORDERBOOK_SNAPSHOT = {};
-
 type PRICE_LEVEL = { totalQuantity: number; orders: LinkList<ORDER> };
 
 type FILL_INFO = {
@@ -60,14 +58,62 @@ type ORDERBOOK = Partial<
 
 // INFO : cross margin has dynamic liquidation price, that we dont have to do right now, just do isolated right now
 
+type ORDERBOOK_SNAPSHOT = {
+  orders: Record<ORDER_ID, ORDER>;
+  depthUpdateOffset: Partial<Record<CURRENCY_SYMBOL, number>>;
+};
 export default class OrderBook implements Snapshotable<ORDERBOOK_SNAPSHOT> {
   orderBook: ORDERBOOK = {};
   orders: Record<ORDER_ID, ORDER> = {}; // here keep ref of item in orderbook, to not double memeory
 
-  fills: Record<string, FILL_INFO> = {};
+  // fills: Record<string, FILL_INFO> = {};
 
   eventBus: EventBus;
   depthUpdateOffset: Map<CURRENCY_SYMBOL, number>;
+
+  getSnapshot(): ORDERBOOK_SNAPSHOT {
+    return {
+      depthUpdateOffset: this.depthUpdateOffset.keys().reduce((obj, curKey) => {
+        obj[curKey] = this.depthUpdateOffset.get(curKey);
+        return obj;
+      }, {} as any),
+      orders: this.orders,
+    };
+  }
+  loadSnapshot(data: ORDERBOOK_SNAPSHOT) {
+    this.orders = data.orders;
+
+    Object.keys(data.depthUpdateOffset).forEach((key) => {
+      this.depthUpdateOffset.set(
+        key as any,
+        data.depthUpdateOffset[key as CURRENCY_SYMBOL]!,
+      );
+    });
+
+    let addToOrderbook = (order: ORDER) => {
+      if (!this.orderBook[order.symbol])
+        this.orderBook[order.symbol] = {
+          BIDS: new OrderedMap(),
+          ASKS: new OrderedMap(),
+        };
+      // this.orderBook[order.symbol][order.side][order.price] = {}
+      let curValue = this.orderBook[order.symbol]![
+        order.side == "BUY" ? "BIDS" : "ASKS"
+      ]!.getElementByKey(order.price) || {
+        totalQuantity: 0,
+        orders: new LinkList<ORDER>(),
+      };
+
+      curValue.totalQuantity += order.qty - order.filledQty;
+      curValue.orders.pushBack(order);
+      this.orderBook[order.symbol]![
+        order.side == "BUY" ? "BIDS" : "ASKS"
+      ]!.setElement(order.price, curValue);
+    };
+    Object.values(this.orders).forEach((order) => {
+      addToOrderbook(order);
+    });
+  }
 
   private createSymbolOrderbook(symbol: CURRENCY_SYMBOL) {
     if (!this.orderBook[symbol]) {
@@ -240,7 +286,7 @@ export default class OrderBook implements Snapshotable<ORDERBOOK_SNAPSHOT> {
         };
 
         fillsToReturn.push(newFill);
-        this.fills[newFill.fillId] = newFill;
+        // this.fills[newFill.fillId] = newFill;
 
         frontOrder!.filledQty += toExchangeQty;
         currentOrder.filledQty += toExchangeQty;
@@ -389,7 +435,7 @@ export default class OrderBook implements Snapshotable<ORDERBOOK_SNAPSHOT> {
 
           fillsToReturn.push(newFill);
           // save to fills
-          this.fills[newFill.fillId] = newFill;
+          // this.fills[newFill.fillId] = newFill;
 
           frontOrder!.filledQty += toExchangeQty;
           currentOrder.filledQty += toExchangeQty;
@@ -478,11 +524,6 @@ export default class OrderBook implements Snapshotable<ORDERBOOK_SNAPSHOT> {
       this.depthUpdateOffset.set(cur, 0);
     });
   }
-
-  getSnapshot() {
-    return {};
-  }
-  loadSnapshot(data: ORDERBOOK_SNAPSHOT) {}
 
   createOrder = (
     type: TYPE,

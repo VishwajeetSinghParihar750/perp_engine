@@ -17,7 +17,12 @@ type ORDER_UPDATES = Record<
     }
   >
 >;
-type POSITION_SNAPSHOT = {};
+type POSITION_SNAPSHOT = {
+  isolatedPositions: Record<
+    string, // userid
+    Partial<Record<CURRENCY_SYMBOL, POSITION>>
+  >;
+};
 
 class PositionManager implements Snapshotable<POSITION_SNAPSHOT> {
   // just isolated
@@ -26,10 +31,12 @@ class PositionManager implements Snapshotable<POSITION_SNAPSHOT> {
     Partial<Record<CURRENCY_SYMBOL, POSITION>>
   > = {}; // this is per user per symbol per price positions
 
-  getSnapshot() {
-    return {};
+  getSnapshot(): POSITION_SNAPSHOT {
+    return { isolatedPositions: this.isolatedPositions };
   }
-  loadSnapshot(data: POSITION_SNAPSHOT) {}
+  loadSnapshot(data: POSITION_SNAPSHOT) {
+    this.isolatedPositions = data.isolatedPositions;
+  }
 
   private calculateOrderUpdates(fills: FILLS_INFO) {
     // there can be position updates at diff price levels for a single user

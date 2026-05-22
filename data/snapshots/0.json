@@ -1,1 +1,1 @@
-{"balance":{"exchangeBalance":100000000,"perSymbolBalances":{},"lockedAccounts":{}},"orderbook":{},"position":{},"liquidation":{}}
+{"balance":{"exchangeBalance":100000000,"perSymbolBalances":{},"lockedAccounts":{}},"orderbook":{"depthUpdateOffset":{"USD":0,"SOLUSD":0,"ETHUSD":0,"BTCUSD":0}},"position":{"isolatedPositions":{}},"liquidation":{"indexPrices":{"BTCUSD":77349.10267278,"ETHUSD":2125.14104129,"SOLUSD":86.68938689},"liquidationPrice":{},"positions":{},"positionsBeingLiquidated":[]}}
