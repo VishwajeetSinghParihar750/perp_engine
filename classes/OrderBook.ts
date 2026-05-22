@@ -71,6 +71,10 @@ export default class OrderBook implements Snapshotable<ORDERBOOK_SNAPSHOT> {
   eventBus: EventBus;
   depthUpdateOffset: Map<CURRENCY_SYMBOL, number>;
 
+  getOrderbook(symbol: CURRENCY_SYMBOL) {
+    return this.orderBook[symbol];
+  }
+
   getSnapshot(): ORDERBOOK_SNAPSHOT {
     return {
       depthUpdateOffset: this.depthUpdateOffset.keys().reduce((obj, curKey) => {

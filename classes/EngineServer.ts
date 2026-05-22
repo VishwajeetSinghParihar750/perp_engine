@@ -17,6 +17,7 @@ type ENGINE_REQUEST_TYPE =
   | "get_depth"
   | "get_orders"
   | "get_order"
+  | "get_orderbook"
   | "get_position"
   | "subscribe_event"
   | "unsubscribe_event";
@@ -31,6 +32,7 @@ type ENGINE_RESPONSE_TYPE =
   | "depth"
   | "position"
   | "orders"
+  | "orderbook"
   | "order"
   | "fills"
   | "error"; // for anything that did not succeed
@@ -320,7 +322,7 @@ class EngineServer {
     }
   };
 
-  private getPositonRequest = (engineRequest: ENGINE_REQUEST) => {
+  private handleGetPositonRequest = (engineRequest: ENGINE_REQUEST) => {
     try {
       let { userId, symbol } = engineRequest.payload;
 
@@ -332,12 +334,30 @@ class EngineServer {
       console.error("error in hanlding mark price update ", error);
     }
   };
+  private handleGetOrderbookRequest = (engineRequest: ENGINE_REQUEST) => {
+    try {
+      let { symbol } = engineRequest.payload;
+
+      //
+      let payload = this.exchange.getOrderbook(symbol);
+
+      return { requestId: engineRequest.requestId, type: "orderbook", payload };
+    } catch (error) {
+      console.error("error in hanlding mark price update ", error);
+    }
+  };
 
   private handleEngineRequest = (engineRequest: ENGINE_REQUEST) => {
     let response;
     switch (engineRequest.type) {
       case "add_balance":
         response = this.handleAddBalanceRequest(engineRequest);
+        break;
+      case "get_position":
+        response = this.handleGetPositonRequest(engineRequest);
+        break;
+      case "get_orderbook":
+        response = this.handleGetOrderbookRequest(engineRequest);
         break;
       case "cancel_order":
         response = this.handleCancelOrderRequest(engineRequest);
