@@ -1,4 +1,5 @@
 import type { RedisClientType } from "redis";
+
 import type { ENGINE_EVENT, ENGINE_EVENT_TYPE } from "../types/events/event.js";
 import type EventBus from "./EventBus.js";
 import type { Snapshotable } from "./SnapshotManger.js";

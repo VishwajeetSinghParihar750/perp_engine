@@ -2,11 +2,11 @@ import type { CURRENCY_SYMBOL } from "../order.js";
 import type { ENGINE_EVENT } from "./event.js";
 
 type LIQUIDATION_EVENT =
-  | "markprice.updates"
+  | "markprice.updated"
   | "liquidation.started"
   | "liquidation.completed";
 interface markPriceUpdated extends ENGINE_EVENT {
-  type: "markprice.updates";
+  type: "markprice.updated";
   data: any;
 }
 interface liquidationStarted extends ENGINE_EVENT {
